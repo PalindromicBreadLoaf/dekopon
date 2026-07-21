@@ -102,6 +102,7 @@ struct MenuSettings {
     int gyro_sensitivity_x{};     // Gyro pointer horizontal sensitivity, percent of the default.
     int gyro_sensitivity_y{};     // Gyro pointer vertical sensitivity, percent of the default.
     std::uint32_t layout_cycle_mask{}; // Presets R3 cycles through (bit i = preset i).
+    bool pause_in_quick_menu{};   // Freeze the game while the in-game quick menu is open.
 };
 
 // Scans the configured ROM directory and the installed SD titles, sorted by title.

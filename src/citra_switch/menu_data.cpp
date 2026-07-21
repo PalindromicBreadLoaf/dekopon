@@ -13,6 +13,7 @@
 #include "citra_switch/config.h"
 #include "citra_switch/input.h"
 #include "citra_switch/menu_data.h"
+#include "citra_switch/overlay_menu.h"
 #include "common/file_util.h"
 #include "common/string_util.h"
 #include "common/settings.h"
@@ -487,6 +488,7 @@ MenuSettings GetMenuSettings() {
         .gyro_sensitivity_x = GetGyroSensitivityX(),
         .gyro_sensitivity_y = GetGyroSensitivityY(),
         .layout_cycle_mask = GetLayoutCycleMask(),
+        .pause_in_quick_menu = IsPauseInQuickMenu(),
     };
 }
 
@@ -512,6 +514,7 @@ void SetMenuSettings(const MenuSettings& s) {
         std::clamp(s.pointer_source, 0, NumPointerSources - 1)));
     SetGyroSensitivity(s.gyro_sensitivity_x, s.gyro_sensitivity_y);
     SetLayoutCycleMask(s.layout_cycle_mask);
+    SetPauseInQuickMenu(s.pause_in_quick_menu);
     SaveConfig();
 
     // The 3DS system language lives in the CFG NAND savegame rather than config.ini,

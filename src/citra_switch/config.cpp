@@ -16,6 +16,7 @@
 #include "citra_switch/config.h"
 #include "citra_switch/default_ini.h"
 #include "citra_switch/input.h"
+#include "citra_switch/overlay_menu.h"
 #include "core/hle/service/service.h"
 
 namespace {
@@ -174,6 +175,9 @@ private:
             config->GetInteger("Switch", "gyro_sensitivity_x", 100),
             config->GetInteger("Switch", "gyro_sensitivity_y", 100));
 
+        SwitchFrontend::SetPauseInQuickMenu(
+            config->GetBoolean("Switch", "pause_in_quick_menu", false));
+
         const long all_layouts = (1L << SwitchFrontend::GetScreenLayoutCount()) - 1;
         SwitchFrontend::SetLayoutCycleMask(static_cast<std::uint32_t>(
             config->GetInteger("Switch", "layout_cycle_mask", all_layouts)));
@@ -239,6 +243,8 @@ private:
         ss << "gyro_sensitivity_x = " << SwitchFrontend::GetGyroSensitivityX() << '\n';
         ss << "gyro_sensitivity_y = " << SwitchFrontend::GetGyroSensitivityY() << '\n';
         ss << "layout_cycle_mask = " << SwitchFrontend::GetLayoutCycleMask() << '\n';
+        ss << "pause_in_quick_menu = "
+           << (SwitchFrontend::IsPauseInQuickMenu() ? "true" : "false") << '\n';
         ss << "launch_count = " << launch_count << "\n\n";
 
         ss << "[Controls]\n";

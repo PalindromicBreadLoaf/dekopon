@@ -36,6 +36,7 @@ enum class Item {
     GyroSensitivityX,
     GyroSensitivityY,
     CpuClock,
+    PauseInMenu,
     Cheat,
     CheatsEmpty,
     Resume,
@@ -83,6 +84,7 @@ constexpr int kClockMax = 400;
 constexpr int kCheatsPerPage = 8;
 
 std::atomic<bool> s_open{false};
+std::atomic<bool> s_pause_in_menu{false};
 int s_page = 0;
 int s_selected = 0;
 int s_cheat_page = 0;
@@ -175,6 +177,7 @@ void RebuildRows() {
         break;
     case Page::System:
         s_rows.push_back({Item::CpuClock});
+        s_rows.push_back({Item::PauseInMenu});
         s_rows.push_back({Item::Resume});
         s_rows.push_back({Item::ExitGame});
         break;
@@ -233,6 +236,8 @@ std::string Label(const Row& row) {
         return "No Right Eye";
     case Item::CpuClock:
         return "CPU Clock";
+    case Item::PauseInMenu:
+        return "Pause In Menu";
     case Item::Cheat:
         return CheatName(row.cheat_index);
     case Item::CheatsEmpty:
@@ -265,6 +270,8 @@ std::string Value(const Row& row) {
         return Settings::values.disable_right_eye_render.GetValue() ? "On" : "Off";
     case Item::CpuClock:
         return std::to_string(Settings::values.cpu_clock_percentage.GetValue()) + "%";
+    case Item::PauseInMenu:
+        return IsPauseInQuickMenu() ? "On" : "Off";
     case Item::Cheat:
         return CheatEnabled(row.cheat_index) ? "On" : "Off";
     default:
@@ -303,6 +310,9 @@ void Adjust(const Row& row, int dir) {
     case Item::CpuClock:
         SetCpuClock(Settings::values.cpu_clock_percentage.GetValue() + dir * kClockStep);
         break;
+    case Item::PauseInMenu:
+        SetPauseInQuickMenu(dir > 0);
+        break;
     case Item::Cheat:
         ToggleCheat(row.cheat_index);
         break;
@@ -333,6 +343,9 @@ void Activate(const Row& row) {
     case Item::DisableRightEyeRender:
         Settings::values.disable_right_eye_render =
             !Settings::values.disable_right_eye_render.GetValue();
+        break;
+    case Item::PauseInMenu:
+        SetPauseInQuickMenu(!IsPauseInQuickMenu());
         break;
     case Item::Cheat:
         ToggleCheat(row.cheat_index);
@@ -374,17 +387,32 @@ bool IsQuickMenuOpen() {
     return s_open.load(std::memory_order_relaxed);
 }
 
+bool IsPauseInQuickMenu() {
+    return s_pause_in_menu.load(std::memory_order_relaxed);
+}
+
+void SetPauseInQuickMenu(bool enabled) {
+    s_pause_in_menu.store(enabled, std::memory_order_relaxed);
+    if (IsQuickMenuOpen()) {
+        SetEmulationPaused(enabled);
+    }
+}
+
 void OpenQuickMenu() {
     s_page = 0;
     s_selected = 0;
     s_cheat_page = 0;
     RebuildRows();
     s_open.store(true, std::memory_order_relaxed);
+    if (IsPauseInQuickMenu()) {
+        SetEmulationPaused(true);
+    }
     Repaint();
 }
 
 void CloseQuickMenu() {
     const bool was_open = s_open.exchange(false, std::memory_order_relaxed);
+    SetEmulationPaused(false);
     VideoCore::OverlayMenuState state;
     state.visible = false;
     VideoCore::SetOverlayMenuState(state);

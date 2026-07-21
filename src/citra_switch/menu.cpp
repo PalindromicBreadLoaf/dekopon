@@ -596,6 +596,7 @@ enum SettingRowIdx {
     SettingRowGyroY,
     SettingRowPreloadTextures,
     SettingRowDumpTextures,
+    SettingRowPauseInQuickMenu,
     SettingRowLayoutCycle,
     SettingRowControllerMap,
     SettingRowCount,
@@ -624,6 +625,7 @@ std::vector<SettingRow> BuildSettingRows(const MenuSettings& s) {
         {"Gyro Sensitivity Y", std::to_string(s.gyro_sensitivity_y) + "%"},
         {"Preload Custom Textures", s.preload_textures ? "On" : "Off"},
         {"Dump Textures", s.dump_textures ? "On" : "Off"},
+        {"Pause In Quick Menu", s.pause_in_quick_menu ? "On" : "Off"},
         {"R3 Screen Layouts", LayoutCycleSummary(s.layout_cycle_mask)},
         {"Controller Mapping", "Configure"},
     };
@@ -694,6 +696,9 @@ void CycleSetting(MenuSettings& s, int idx, int dir) {
         break;
     case SettingRowDumpTextures:
         s.dump_textures = dir > 0;
+        break;
+    case SettingRowPauseInQuickMenu:
+        s.pause_in_quick_menu = dir > 0;
         break;
     default:
         break;

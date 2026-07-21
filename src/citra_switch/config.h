@@ -55,6 +55,10 @@ bool BootRom(const std::string& rom_arg);
 // True while the emulation thread is running.
 bool IsRunning();
 
+// Freezes the guest between run loop slices, while the frontend keeps presenting the last frame.
+void SetEmulationPaused(bool paused);
+bool IsEmulationPaused();
+
 // Advances the screen layout to the next preset while a game runs.
 void CycleScreenLayout();
 

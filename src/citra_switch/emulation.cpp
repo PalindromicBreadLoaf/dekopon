@@ -4,6 +4,7 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -33,6 +34,11 @@ std::atomic<bool> s_stop{true};
 // Set true once system.Load succeeds.
 // This lets the menu tell a crash/bad ROM apart from a clean exit.
 std::atomic<bool> s_load_ok{false};
+// Freezes the guest between run loop slices.
+std::atomic<bool> s_paused{false};
+
+// How long the paused loop waits between repaints.
+constexpr auto kPausedFrameInterval = std::chrono::milliseconds(8);
 
 // The screen arrangements R3 cycles through.
 struct ScreenLayoutPreset {
@@ -180,6 +186,13 @@ void EmuThread(std::string path) {
 
     LOG_INFO(Frontend, "Emulation started (program id {:016X})", program_id);
     while (!s_stop) {
+        if (s_paused.load(std::memory_order_relaxed)) {
+            // The overlay is only drawn as part of a frame present, so the last frame has to keep being presented.
+            system.GPU().Renderer().SwapBuffers();
+            std::this_thread::sleep_for(kPausedFrameInterval);
+            continue;
+        }
+
         const Core::System::ResultStatus result = system.RunLoop();
         if (result == Core::System::ResultStatus::Success) {
             continue;
@@ -210,6 +223,7 @@ bool BootRom(const std::string& rom_arg) {
     LOG_INFO(Frontend, "Booting ROM {}", path);
 
     s_load_ok = false;
+    s_paused = false;
     auto& system = Core::System::GetInstance();
     FileUtil::SetCurrentRomPath(path);
 
@@ -241,6 +255,14 @@ bool BootRom(const std::string& rom_arg) {
 
 bool IsRunning() {
     return !s_stop;
+}
+
+void SetEmulationPaused(bool paused) {
+    s_paused.store(paused, std::memory_order_relaxed);
+}
+
+bool IsEmulationPaused() {
+    return s_paused.load(std::memory_order_relaxed);
 }
 
 void StepScreenLayout(int delta) {
@@ -328,6 +350,7 @@ bool LoadFailed() {
 
 void StopRom() {
     s_stop = true;
+    s_paused = false;
     CancelKeyboard();
     if (s_emu_thread.joinable()) {
         s_emu_thread.join();

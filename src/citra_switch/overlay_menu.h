@@ -31,6 +31,10 @@ struct QuickMenuNav {
 // True while the overlay is showing.
 bool IsQuickMenuOpen();
 
+// Whether opening the overlay freezes the game.
+bool IsPauseInQuickMenu();
+void SetPauseInQuickMenu(bool enabled);
+
 // Opens/closes the overlay saving any changed settings.
 void OpenQuickMenu();
 void CloseQuickMenu();
