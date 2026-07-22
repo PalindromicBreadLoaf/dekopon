@@ -19,7 +19,7 @@ Other features include:
 - CIA installation support
 - Switch software (and hardware) keyboard support
 - Multiple screen layouts via R3 (Press the right stick)
-- Virtual touch input via L3
+- Virtual touch input
 - Full button remapping support
 - In-game menu accessible via '+' and '-'
 - Cheat, mod (LayeredFS), and texture-pack support
