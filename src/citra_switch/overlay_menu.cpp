@@ -28,6 +28,9 @@ namespace {
 enum class Item {
     ScreenLayout,
     SwapScreens,
+    OverlayPosition,
+    OverlaySize,
+    OverlayOpacity,
     FpsCounter,
     CustomTextures,
     DisableRightEyeRender,
@@ -165,6 +168,11 @@ void RebuildRows() {
     case Page::Display:
         s_rows.push_back({Item::ScreenLayout});
         s_rows.push_back({Item::SwapScreens});
+        if (IsOverlayScreenLayout()) {
+            s_rows.push_back({Item::OverlayPosition});
+            s_rows.push_back({Item::OverlaySize});
+            s_rows.push_back({Item::OverlayOpacity});
+        }
         s_rows.push_back({Item::FpsCounter});
         s_rows.push_back({Item::CustomTextures});
         s_rows.push_back({Item::DisableRightEyeRender});
@@ -220,6 +228,12 @@ std::string Label(const Row& row) {
         return "Screen Layout";
     case Item::SwapScreens:
         return "Swap Screens";
+    case Item::OverlayPosition:
+        return "Overlay Position";
+    case Item::OverlaySize:
+        return "Overlay Size";
+    case Item::OverlayOpacity:
+        return "Overlay Opacity";
     case Item::GyroSensitivityX:
         return "Gyro Sens. X";
     case Item::GyroSensitivityY:
@@ -254,6 +268,12 @@ std::string Value(const Row& row) {
     switch (row.item) {
     case Item::ScreenLayout:
         return CurrentScreenLayoutName();
+    case Item::OverlayPosition:
+        return OverlayScreenPositionName();
+    case Item::OverlaySize:
+        return std::to_string(GetOverlayScreenSize()) + "%";
+    case Item::OverlayOpacity:
+        return std::to_string(GetOverlayScreenOpacity()) + "%";
     case Item::GyroSensitivityX:
         return std::to_string(GetGyroSensitivityX()) + "%";
     case Item::GyroSensitivityY:
@@ -284,6 +304,15 @@ void Adjust(const Row& row, int dir) {
     switch (row.item) {
     case Item::ScreenLayout:
         StepScreenLayout(dir);
+        break;
+    case Item::OverlayPosition:
+        StepOverlayScreenPosition(dir);
+        break;
+    case Item::OverlaySize:
+        StepOverlayScreenSize(dir);
+        break;
+    case Item::OverlayOpacity:
+        StepOverlayScreenOpacity(dir);
         break;
     case Item::GyroSensitivityX:
         SetGyroSensitivity(GetGyroSensitivityX() + dir * kGyroStep, GetGyroSensitivityY());
@@ -472,7 +501,7 @@ QuickMenuAction UpdateQuickMenu(const QuickMenuNav& nav) {
         changed = true;
     }
 
-    const Row& row = s_rows[s_selected];
+    const Row row = s_rows[s_selected];
     if (nav.left && !IsAction(row)) {
         Adjust(row, -1);
         changed = true;
@@ -495,6 +524,7 @@ QuickMenuAction UpdateQuickMenu(const QuickMenuNav& nav) {
     }
 
     if (changed) {
+        RebuildRows();
         Repaint();
     }
     return QuickMenuAction::None;

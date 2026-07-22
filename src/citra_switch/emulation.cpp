@@ -2,6 +2,7 @@
 // Copyright(c) 2026: PalindromicBreadLoaf (palindromicbreadloaf@tuta.com)
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -50,7 +51,7 @@ struct ScreenLayoutPreset {
     const char* name;
 };
 
-constexpr std::array<ScreenLayoutPreset, 9> s_layout_presets{{
+constexpr std::array<ScreenLayoutPreset, 10> s_layout_presets{{
     {Settings::LayoutOption::Default, false, false, false,
      Settings::SmallScreenPosition::BottomRight, "Vertical stack"},
     {Settings::LayoutOption::SideScreen, false, false, false,
@@ -69,7 +70,19 @@ constexpr std::array<ScreenLayoutPreset, 9> s_layout_presets{{
      Settings::SmallScreenPosition::BottomRight, "Hybrid screen"},
     {Settings::LayoutOption::Default, false, true, true,
      Settings::SmallScreenPosition::BottomRight, "Vertical stack (rotate console other way)"},
+    {Settings::LayoutOption::OverlayScreen, false, false, false,
+     Settings::SmallScreenPosition::BottomRight, "Bottom screen overlay"},
 }};
+
+// Anchors the overlaid screen can snap to.
+constexpr std::array<const char*, 8> s_overlay_position_names{
+    "Top right",  "Middle right", "Bottom right", "Top left",
+    "Middle left", "Bottom left", "Top centre",   "Bottom centre",
+};
+
+// Step sizes for the overlaid screen's size and opacity, in percent.
+constexpr int kOverlaySizeStep = 5;
+constexpr int kOverlayOpacityStep = 10;
 
 // Kept consistent with Settings so the first press advances past the boot default.
 std::size_t s_layout_index = 0;
@@ -276,6 +289,59 @@ void StepScreenLayout(int delta) {
                                                count) %
                                               count);
     ApplyCurrentLayout();
+}
+
+bool IsOverlayScreenLayout() {
+    return Settings::values.layout_option.GetValue() == Settings::LayoutOption::OverlayScreen;
+}
+
+void StepOverlayScreenPosition(int delta) {
+    auto& system = Core::System::GetInstance();
+    if (!system.IsPoweredOn()) {
+        return;
+    }
+
+    const int count = static_cast<int>(s_overlay_position_names.size());
+    const int current = static_cast<int>(Settings::values.overlay_screen_position.GetValue());
+    Settings::values.overlay_screen_position =
+        static_cast<Settings::SmallScreenPosition>(((current + delta) % count + count) % count);
+    system.GPU().Renderer().UpdateCurrentFramebufferLayout();
+}
+
+const char* OverlayScreenPositionName() {
+    const auto position = static_cast<std::size_t>(
+        Settings::values.overlay_screen_position.GetValue());
+    return position < s_overlay_position_names.size() ? s_overlay_position_names[position] : "";
+}
+
+void StepOverlayScreenSize(int delta) {
+    auto& system = Core::System::GetInstance();
+    if (!system.IsPoweredOn()) {
+        return;
+    }
+
+    Settings::values.overlay_screen_size = static_cast<u16>(std::max(
+        0, Settings::values.overlay_screen_size.GetValue() + delta * kOverlaySizeStep));
+    system.GPU().Renderer().UpdateCurrentFramebufferLayout();
+}
+
+int GetOverlayScreenSize() {
+    return Settings::values.overlay_screen_size.GetValue();
+}
+
+void StepOverlayScreenOpacity(int delta) {
+    auto& system = Core::System::GetInstance();
+    if (!system.IsPoweredOn()) {
+        return;
+    }
+
+    Settings::values.overlay_screen_opacity = static_cast<u16>(std::max(
+        0, Settings::values.overlay_screen_opacity.GetValue() + delta * kOverlayOpacityStep));
+    system.GPU().Renderer().UpdateCurrentFramebufferLayout();
+}
+
+int GetOverlayScreenOpacity() {
+    return Settings::values.overlay_screen_opacity.GetValue();
 }
 
 void CycleScreenLayout() {

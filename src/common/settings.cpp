@@ -131,6 +131,9 @@ void LogSettings() {
     log_setting("Layout_ScreenGap", values.screen_gap.GetValue());
     log_setting("Layout_LargeScreenProportion", values.large_screen_proportion.GetValue());
     log_setting("Layout_SmallScreenPosition", values.small_screen_position.GetValue());
+    log_setting("Layout_OverlayScreenPosition", values.overlay_screen_position.GetValue());
+    log_setting("Layout_OverlayScreenSize", values.overlay_screen_size.GetValue());
+    log_setting("Layout_OverlayScreenOpacity", values.overlay_screen_opacity.GetValue());
     // log_setting("Layout_LayoutsToCycle",values.layouts_to_cycle.GetValue());
     log_setting("Utility_DumpTextures", values.dump_textures.GetValue());
     log_setting("Utility_CustomTextures", values.custom_textures.GetValue());

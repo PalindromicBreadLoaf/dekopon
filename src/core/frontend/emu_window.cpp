@@ -287,6 +287,14 @@ void EmuWindow::UpdateCurrentFramebufferLayout(u32 width, u32 height, bool is_po
                                          Settings::values.upright_screen.GetValue(), 1.0f,
                                          Settings::SmallScreenPosition::MiddleRight);
             break;
+        case Settings::LayoutOption::OverlayScreen:
+            layout = Layout::OverlayFrameLayout(
+                width, height, Settings::values.swap_screen.GetValue(),
+                Settings::values.upright_screen.GetValue(),
+                Settings::values.overlay_screen_size.GetValue(),
+                Settings::values.overlay_screen_position.GetValue(),
+                Settings::values.overlay_screen_opacity.GetValue());
+            break;
 #ifndef ANDROID
         case Settings::LayoutOption::SeparateWindows:
             layout = Layout::SeparateWindowsLayout(width, height, is_secondary,

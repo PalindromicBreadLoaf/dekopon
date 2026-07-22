@@ -68,6 +68,17 @@ void StepScreenLayout(int delta);
 // Swaps which 3DS screen occupies which slot of the current arrangement.
 void ToggleSwapScreens();
 
+// True while the layout draws one screen as an overlay on top of the other.
+bool IsOverlayScreenLayout();
+
+// Live adjustments for the overlaid screen.
+void StepOverlayScreenPosition(int delta);
+const char* OverlayScreenPositionName();
+void StepOverlayScreenSize(int delta);
+int GetOverlayScreenSize();
+void StepOverlayScreenOpacity(int delta);
+int GetOverlayScreenOpacity();
+
 // The name of the currently selected screen layout preset.
 const char* CurrentScreenLayoutName();
 

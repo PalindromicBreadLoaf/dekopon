@@ -50,6 +50,8 @@ enum class LayoutOption : u32 { // Shouldn't these have set numbers to prevent l
     CustomLayout,
     TopScreenOnly,
     BottomScreenOnly,
+    // Large screen filling the window with the other screen floating on top of it.
+    OverlayScreen,
 };
 
 /** Defines the layout option for mobile portrait */
@@ -71,7 +73,8 @@ enum class SecondaryDisplayLayout : u32 {
     LargeScreen
 };
 /** Defines where the small screen will appear relative to the large screen
- * when in Large Screen mode
+ * when in Large Screen mode. Overlay Screen mode reuses these as anchors inside
+ * the large screen, where AboveLarge/BelowLarge mean top/bottom centre.
  */
 enum class SmallScreenPosition : u32 {
     TopRight,
@@ -580,6 +583,11 @@ struct Values {
     SwitchableSetting<int> screen_gap{0, Keys::screen_gap};
     SwitchableSetting<SmallScreenPosition> small_screen_position{SmallScreenPosition::BottomRight,
                                                                  Keys::small_screen_position};
+    SwitchableSetting<SmallScreenPosition> overlay_screen_position{
+        SmallScreenPosition::BottomRight, Keys::overlay_screen_position};
+    SwitchableSetting<u16, true> overlay_screen_size{25, 10, 60, Keys::overlay_screen_size};
+    SwitchableSetting<u16, true> overlay_screen_opacity{100, 10, 100,
+                                                        Keys::overlay_screen_opacity};
     Setting<u16> custom_top_x{0, Keys::custom_top_x};
     Setting<u16> custom_top_y{0, Keys::custom_top_y};
     Setting<u16> custom_top_width{800, Keys::custom_top_width};

@@ -268,6 +268,94 @@ FramebufferLayout LargeFrameLayout(u32 width, u32 height, bool swapped, bool upr
     }
 }
 
+FramebufferLayout OverlayFrameLayout(u32 width, u32 height, bool swapped, bool upright,
+                                     u32 size_percent, Settings::SmallScreenPosition position,
+                                     u32 opacity_percent) {
+    ASSERT(width > 0);
+    ASSERT(height > 0);
+    if (upright) {
+        std::swap(width, height);
+    }
+    FramebufferLayout res{width, height, true, true, {}, {}, !upright};
+
+    const u32 large_width = swapped ? Core::kScreenBottomWidth : Core::kScreenTopWidth;
+    const u32 large_height = swapped ? Core::kScreenBottomHeight : Core::kScreenTopHeight;
+    const u32 small_width = swapped ? Core::kScreenTopWidth : Core::kScreenBottomWidth;
+    const u32 small_height = swapped ? Core::kScreenTopHeight : Core::kScreenBottomHeight;
+
+    const Common::Rectangle<u32> screen_window_area{0, 0, width, height};
+    Common::Rectangle<u32> large_screen{0, 0, large_width, large_height};
+
+    const auto aspect_ratio_setting = Settings::values.aspect_ratio.GetValue();
+    switch (aspect_ratio_setting) {
+    case Settings::AspectRatio::Default:
+        large_screen = MaxRectangle(screen_window_area, large_screen,
+                                    Settings::values.use_integer_scaling.GetValue());
+        break;
+    case Settings::AspectRatio::Stretch:
+        large_screen = MaxRectangle(screen_window_area,
+                                    static_cast<float>(height) / static_cast<float>(width));
+        break;
+    default:
+        large_screen = MaxRectangle(screen_window_area,
+                                    FramebufferLayout::GetAspectRatioValue(aspect_ratio_setting));
+        break;
+    }
+    large_screen = large_screen.TranslateX((width - large_screen.GetWidth()) / 2)
+                       .TranslateY((height - large_screen.GetHeight()) / 2);
+
+    const u32 overlay_width = large_screen.GetWidth() * size_percent / 100;
+    const u32 overlay_height = overlay_width * small_height / small_width;
+
+    u32 left;
+    switch (position) {
+    case Settings::SmallScreenPosition::TopLeft:
+    case Settings::SmallScreenPosition::MiddleLeft:
+    case Settings::SmallScreenPosition::BottomLeft:
+        left = large_screen.left;
+        break;
+    case Settings::SmallScreenPosition::AboveLarge:
+    case Settings::SmallScreenPosition::BelowLarge:
+        left = large_screen.left + (large_screen.GetWidth() - overlay_width) / 2;
+        break;
+    default:
+        left = large_screen.right - overlay_width;
+        break;
+    }
+
+    u32 top;
+    switch (position) {
+    case Settings::SmallScreenPosition::TopLeft:
+    case Settings::SmallScreenPosition::TopRight:
+    case Settings::SmallScreenPosition::AboveLarge:
+        top = large_screen.top;
+        break;
+    case Settings::SmallScreenPosition::MiddleLeft:
+    case Settings::SmallScreenPosition::MiddleRight:
+        top = large_screen.top + (large_screen.GetHeight() - overlay_height) / 2;
+        break;
+    default:
+        top = large_screen.bottom - overlay_height;
+        break;
+    }
+
+    const Common::Rectangle<u32> overlay_screen{left, top, left + overlay_width,
+                                                top + overlay_height};
+
+    res.top_screen = swapped ? overlay_screen : large_screen;
+    res.bottom_screen = swapped ? large_screen : overlay_screen;
+
+    // The overlaid screen is the one drawn second, so it is the one the renderer blends.
+    const float opacity = static_cast<float>(opacity_percent) / 100.0f;
+    (swapped ? res.top_opacity : res.bottom_opacity) = opacity;
+
+    if (upright) {
+        return reverseLayout(res);
+    } else {
+        return res;
+    }
+}
+
 FramebufferLayout HybridScreenLayout(u32 width, u32 height, bool swapped, bool upright) {
     ASSERT(width > 0);
     ASSERT(height > 0);
@@ -510,6 +598,21 @@ FramebufferLayout FrameLayoutFromResolutionScale(u32 res_scale, bool is_secondar
                                       Settings::values.small_screen_position.GetValue());
             break;
         }
+        case Settings::LayoutOption::OverlayScreen: {
+            const bool swapped = Settings::values.swap_screen.GetValue();
+            width = (swapped ? Core::kScreenBottomWidth : Core::kScreenTopWidth) * res_scale;
+            height = (swapped ? Core::kScreenBottomHeight : Core::kScreenTopHeight) * res_scale;
+
+            if (Settings::values.upright_screen.GetValue()) {
+                std::swap(width, height);
+            }
+            layout = OverlayFrameLayout(width, height, swapped,
+                                        Settings::values.upright_screen.GetValue(),
+                                        Settings::values.overlay_screen_size.GetValue(),
+                                        Settings::values.overlay_screen_position.GetValue(),
+                                        Settings::values.overlay_screen_opacity.GetValue());
+            break;
+        }
         case Settings::LayoutOption::SideScreen:
             width = (Core::kScreenTopWidth + Core::kScreenBottomWidth) * res_scale + gap;
             height = Core::kScreenTopHeight * res_scale;
@@ -725,6 +828,12 @@ std::pair<unsigned, unsigned> GetMinimumSizeFromLayout(Settings::LayoutOption la
         min_width = Core::kScreenTopWidth + Core::kScreenBottomWidth;
         min_height = Core::kScreenBottomHeight;
         break;
+    case Settings::LayoutOption::OverlayScreen: {
+        const bool swapped = Settings::values.swap_screen.GetValue();
+        min_width = swapped ? Core::kScreenBottomWidth : Core::kScreenTopWidth;
+        min_height = swapped ? Core::kScreenBottomHeight : Core::kScreenTopHeight;
+        break;
+    }
     case Settings::LayoutOption::Default:
     default:
         min_width = Core::kScreenTopWidth;

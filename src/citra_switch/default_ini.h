@@ -52,6 +52,17 @@ use_shader_jit =
 # Can also be toggled live from the quick menu.
 disable_right_eye_render = false
 
+[Layout]
+# Where the small screen sits inside the big one in the "Bottom screen overlay" layout.
+# 0: top right, 1: middle right, 2: bottom right (default), 3: top left, 4: middle left,
+# 5: bottom left, 6: top centre, 7: bottom centre.
+# Can also be changed live from the quick menu.
+overlay_screen_position =
+# Width of the overlaid screen as a percentage of the big screen, 10-60 (25, default).
+overlay_screen_size =
+# How opaque the overlaid screen is drawn, 10-100 (100, default).
+overlay_screen_opacity =
+
 [Utility]
 # Load a custom texture pack from load/textures/<TITLE_ID>/ (0, default).
 # Can also be toggled live from the quick menu.

@@ -145,6 +145,11 @@ private:
         ReadSetting("Renderer", Settings::values.use_shader_jit);
         ReadSetting("Renderer", Settings::values.disable_right_eye_render);
 
+        // Layout
+        ReadSetting("Layout", Settings::values.overlay_screen_position);
+        ReadSetting("Layout", Settings::values.overlay_screen_size);
+        ReadSetting("Layout", Settings::values.overlay_screen_opacity);
+
         // Utility
         ReadSetting("Utility", Settings::values.custom_textures);
         ReadSetting("Utility", Settings::values.preload_textures);
@@ -224,6 +229,12 @@ private:
         ss << "use_shader_jit = " << (v.use_shader_jit.GetValue() ? "true" : "false") << '\n';
         ss << "disable_right_eye_render = "
            << (v.disable_right_eye_render.GetValue() ? "true" : "false") << "\n\n";
+
+        ss << "[Layout]\n";
+        ss << "overlay_screen_position = "
+           << static_cast<int>(v.overlay_screen_position.GetValue()) << '\n';
+        ss << "overlay_screen_size = " << v.overlay_screen_size.GetValue() << '\n';
+        ss << "overlay_screen_opacity = " << v.overlay_screen_opacity.GetValue() << "\n\n";
 
         ss << "[Utility]\n";
         ss << "custom_textures = " << (v.custom_textures.GetValue() ? "true" : "false") << '\n';

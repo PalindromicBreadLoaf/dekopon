@@ -125,6 +125,22 @@ FramebufferLayout LargeFrameLayout(u32 width, u32 height, bool is_swapped, bool 
                                    float scale_factor,
                                    Settings::SmallScreenPosition small_screen_position);
 /**
+ * Factory method for constructing a Frame where the large screen fills the window and the small
+ * screen floats on top of it, anchored to one of its edges or corners
+ * @param width Window framebuffer width in pixels
+ * @param height Window framebuffer height in pixels
+ * @param is_swapped if true, the bottom screen will be the large display
+ * @param upright if true, the screens will be rotated 90 degrees anti-clockwise
+ * @param size_percent Width of the small screen as a percentage of the large screen's width
+ * @param position Where the small screen is anchored within the large screen
+ * @param opacity_percent How opaque the small screen is drawn
+ * @return Newly created FramebufferLayout object with default screen regions initialized
+ */
+FramebufferLayout OverlayFrameLayout(u32 width, u32 height, bool is_swapped, bool upright,
+                                     u32 size_percent, Settings::SmallScreenPosition position,
+                                     u32 opacity_percent);
+
+/**
  * Factory method for constructing a frame with 2.5 times bigger top screen on the right,
  * and 1x top and bottom screen on the left
  * @param width Window framebuffer width in pixels
