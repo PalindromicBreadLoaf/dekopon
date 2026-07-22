@@ -189,13 +189,47 @@ RendererVulkan::~RendererVulkan() {
     vmaDestroyImage(instance.GetAllocator(), overlay_font_image, overlay_font_allocation);
 }
 
+std::array<bool, 3> RendererVulkan::GetPresentedScreens() const {
+    // The screenshot pass runs off its own layout, so give it everything.
+    if (settings.screenshot_requested.load(std::memory_order_relaxed)) {
+        return {true, true, true};
+    }
+
+    std::array<bool, 3> presented{};
+    const auto mark = [&presented](const Layout::FramebufferLayout& layout) {
+        if (layout.top_screen_enabled) {
+            if (layout.render_3d_mode == Settings::StereoRenderOption::Off) {
+                const u32 eye = static_cast<u32>(Settings::values.mono_render_option.GetValue());
+                presented[eye] = true;
+            } else {
+                presented[0] = presented[1] = true;
+            }
+        }
+        presented[2] |= layout.bottom_screen_enabled;
+    };
+
+    mark(render_window.GetFramebufferLayout());
+    if (secondary_window) {
+        mark(secondary_window->GetFramebufferLayout());
+    }
+    return presented;
+}
+
 void RendererVulkan::PrepareRendertarget() {
     const auto& framebuffer_config = pica.regs.framebuffer_config;
     const auto& regs_lcd = pica.regs_lcd;
+    const auto presented = GetPresentedScreens();
     for (u32 i = 0; i < 3; i++) {
         const u32 fb_id = i == 2 ? 1 : 0;
         const auto& framebuffer = framebuffer_config[fb_id];
         auto& texture = screen_infos[i].texture;
+
+        // A hidden screen still has to hold a live view for the present descriptor set, so point it
+        // back at its own texture; the cache surface it was showing may since have been retired.
+        if (!presented[i] && texture.image_view) {
+            screen_infos[i].image_view = texture.image_view;
+            continue;
+        }
 
         const auto color_fill = fb_id == 0 ? regs_lcd.color_fill_top : regs_lcd.color_fill_bottom;
         if (color_fill.is_enabled) {

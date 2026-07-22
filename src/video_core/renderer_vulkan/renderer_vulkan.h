@@ -96,6 +96,7 @@ private:
     void ConfigureFramebufferTexture(TextureInfo& texture,
                                      const Pica::FramebufferConfig& framebuffer);
     void ConfigureRenderPipeline();
+    std::array<bool, 3> GetPresentedScreens() const;
     void PrepareRendertarget();
     void RenderScreenshot();
     void RenderScreenshotWithStagingCopy();
