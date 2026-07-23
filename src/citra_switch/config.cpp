@@ -146,6 +146,7 @@ private:
         ReadSetting("Renderer", Settings::values.disable_right_eye_render);
 
         // Layout
+        ReadSetting("Layout", Settings::values.screen_gap);
         ReadSetting("Layout", Settings::values.overlay_screen_position);
         ReadSetting("Layout", Settings::values.overlay_screen_size);
         ReadSetting("Layout", Settings::values.overlay_screen_opacity);
@@ -231,6 +232,7 @@ private:
            << (v.disable_right_eye_render.GetValue() ? "true" : "false") << "\n\n";
 
         ss << "[Layout]\n";
+        ss << "screen_gap = " << v.screen_gap.GetValue() << '\n';
         ss << "overlay_screen_position = "
            << static_cast<int>(v.overlay_screen_position.GetValue()) << '\n';
         ss << "overlay_screen_size = " << v.overlay_screen_size.GetValue() << '\n';

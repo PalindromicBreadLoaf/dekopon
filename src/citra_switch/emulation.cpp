@@ -84,6 +84,9 @@ constexpr std::array<const char*, 8> s_overlay_position_names{
 constexpr int kOverlaySizeStep = 5;
 constexpr int kOverlayOpacityStep = 10;
 
+// Step size for the gap between the two screens.
+constexpr int kScreenGapStep = 4;
+
 // Kept consistent with Settings so the first press advances past the boot default.
 std::size_t s_layout_index = 0;
 
@@ -342,6 +345,21 @@ void StepOverlayScreenOpacity(int delta) {
 
 int GetOverlayScreenOpacity() {
     return Settings::values.overlay_screen_opacity.GetValue();
+}
+
+void StepScreenGap(int delta) {
+    auto& system = Core::System::GetInstance();
+    if (!system.IsPoweredOn()) {
+        return;
+    }
+
+    Settings::values.screen_gap =
+        std::max(0, Settings::values.screen_gap.GetValue() + delta * kScreenGapStep);
+    system.GPU().Renderer().UpdateCurrentFramebufferLayout();
+}
+
+int GetScreenGap() {
+    return Settings::values.screen_gap.GetValue();
 }
 
 void CycleScreenLayout() {

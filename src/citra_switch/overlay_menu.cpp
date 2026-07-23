@@ -28,6 +28,7 @@ namespace {
 enum class Item {
     ScreenLayout,
     SwapScreens,
+    ScreenGap,
     OverlayPosition,
     OverlaySize,
     OverlayOpacity,
@@ -168,6 +169,7 @@ void RebuildRows() {
     case Page::Display:
         s_rows.push_back({Item::ScreenLayout});
         s_rows.push_back({Item::SwapScreens});
+        s_rows.push_back({Item::ScreenGap});
         if (IsOverlayScreenLayout()) {
             s_rows.push_back({Item::OverlayPosition});
             s_rows.push_back({Item::OverlaySize});
@@ -228,6 +230,8 @@ std::string Label(const Row& row) {
         return "Screen Layout";
     case Item::SwapScreens:
         return "Swap Screens";
+    case Item::ScreenGap:
+        return "Screen Gap";
     case Item::OverlayPosition:
         return "Overlay Position";
     case Item::OverlaySize:
@@ -268,6 +272,8 @@ std::string Value(const Row& row) {
     switch (row.item) {
     case Item::ScreenLayout:
         return CurrentScreenLayoutName();
+    case Item::ScreenGap:
+        return std::to_string(GetScreenGap()) + " px";
     case Item::OverlayPosition:
         return OverlayScreenPositionName();
     case Item::OverlaySize:
@@ -304,6 +310,9 @@ void Adjust(const Row& row, int dir) {
     switch (row.item) {
     case Item::ScreenLayout:
         StepScreenLayout(dir);
+        break;
+    case Item::ScreenGap:
+        StepScreenGap(dir);
         break;
     case Item::OverlayPosition:
         StepOverlayScreenPosition(dir);

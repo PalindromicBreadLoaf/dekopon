@@ -79,6 +79,10 @@ int GetOverlayScreenSize();
 void StepOverlayScreenOpacity(int delta);
 int GetOverlayScreenOpacity();
 
+// Live gap between the two screens, in px relative to the larger screen.
+void StepScreenGap(int delta);
+int GetScreenGap();
+
 // The name of the currently selected screen layout preset.
 const char* CurrentScreenLayoutName();
 
