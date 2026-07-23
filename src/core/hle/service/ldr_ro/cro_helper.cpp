@@ -78,12 +78,70 @@ Result CROHelper::ApplyRelocation(VAddr target_address, RelocationType relocatio
         system.Memory().Write32(target_address, symbol_address + addend - target_future_address);
         system.InvalidateCacheRange(target_address, sizeof(u32));
         break;
-    case RelocationType::ThumbBranch:
-    case RelocationType::ArmBranch:
-    case RelocationType::ModifyArmBranch:
+    case RelocationType::ThumbBranch: {
+        // Thumb-2 BL/BLX: two 16-bit halfwords at target_address and target_address+2.
+        // T1 = 1111_0 S imm10   T2 = 11 J1 1 J2 imm11
+        // signed offset = S:I1:I2:imm10:imm11:0  where I1=NOT(J1 XOR S), I2=NOT(J2 XOR S)
+        // PC = target_address + 4 for Thumb-2 branch resolution
+        u16 t1 = system.Memory().Read16(target_address);
+        u16 t2 = system.Memory().Read16(target_address + 2);
+        if (symbol_address == 0) {
+            // No handler, so effectively NULL
+            t1 = t1 & 0xF800u;
+            t2 = static_cast<u16>((t2 & 0xD000u) | 0x2800u); // J1=1, J2=1, imm11=0
+        } else {
+            u32 offset = (symbol_address + addend) - (target_address + 4);
+            u32 S = (offset >> 24) & 1;
+            u32 I1 = (offset >> 23) & 1;
+            u32 I2 = (offset >> 22) & 1;
+            u32 J1 = (~(I1 ^ S)) & 1;
+            u32 J2 = (~(I2 ^ S)) & 1;
+            u32 imm10 = (offset >> 12) & 0x3FF;
+            u32 imm11 = (offset >> 1) & 0x7FF;
+            t1 = static_cast<u16>((t1 & 0xF800u) | (S << 10) | imm10);
+            t2 = static_cast<u16>((t2 & 0xD000u) | (J1 << 13) | (J2 << 11) | imm11);
+        }
+        system.Memory().Write16(target_address, t1);
+        system.Memory().Write16(target_address + 2, t2);
+        system.InvalidateCacheRange(target_address, 4);
+        break;
+    }
+    case RelocationType::ArmBranch: {
+        // Bits [23:0] hold the signed PC-relative word offset; PC = target_address + 8.
+        u32 instr = system.Memory().Read32(target_address);
+        u32 offset;
+        if (symbol_address == 0) {
+            offset = 0; // clear to local branch (BL . +8)
+        } else {
+            offset = (symbol_address + addend - (target_address + 8)) >> 2;
+        }
+        instr = (instr & 0xFF000000u) | (offset & 0x00FFFFFFu);
+        system.Memory().Write32(target_address, instr);
+        system.InvalidateCacheRange(target_address, sizeof(u32));
+        break;
+    }
+    case RelocationType::ModifyArmBranch: {
+        // Like ArmBranch but uses the instruction's existing 24-bit offset as an extra addend.
+        u32 instr = system.Memory().Read32(target_address);
+        s32 existing = static_cast<s32>((instr & 0x00FFFFFFu) << 8) >> 8; // sign-extend 24-bit
+        u32 offset;
+        if (symbol_address == 0) {
+            offset = 0;
+        } else {
+            offset = (symbol_address + addend + static_cast<u32>(existing * 4) -
+                      (target_address + 8)) >>
+                     2;
+        }
+        instr = (instr & 0xFF000000u) | (offset & 0x00FFFFFFu);
+        system.Memory().Write32(target_address, instr);
+        system.InvalidateCacheRange(target_address, sizeof(u32));
+        break;
+    }
     case RelocationType::AlignedRelativeAddress:
-        // TODO(wwylele): implement other types
-        UNIMPLEMENTED();
+        // Like RelativeAddress but aligns the symbol to 4 bytes.
+        system.Memory().Write32(target_address,
+                                ((symbol_address + addend) & ~3u) - target_address);
+        system.InvalidateCacheRange(target_address, sizeof(u32));
         break;
     default:
         return CROFormatError(0x22);
@@ -101,12 +159,30 @@ Result CROHelper::ClearRelocation(VAddr target_address, RelocationType relocatio
         system.Memory().Write32(target_address, 0);
         system.InvalidateCacheRange(target_address, sizeof(u32));
         break;
-    case RelocationType::ThumbBranch:
+    case RelocationType::ThumbBranch: {
+        // Clear to BL with zero offset (branches to PC+4 = the next instruction).
+        // J1=1, J2=1 for offset=0.
+        u16 t1 = system.Memory().Read16(target_address);
+        u16 t2 = system.Memory().Read16(target_address + 2);
+        t1 = t1 & 0xF800u;                                // S=0, imm10=0
+        t2 = static_cast<u16>((t2 & 0xD000u) | 0x2800u); // J1=1, J2=1, imm11=0
+        system.Memory().Write16(target_address, t1);
+        system.Memory().Write16(target_address + 2, t2);
+        system.InvalidateCacheRange(target_address, 4);
+        break;
+    }
     case RelocationType::ArmBranch:
-    case RelocationType::ModifyArmBranch:
+    case RelocationType::ModifyArmBranch: {
+        // Clear the 24-bit offset to 0, preserving the condition and BL/B opcode bits.
+        u32 instr = system.Memory().Read32(target_address);
+        instr = instr & 0xFF000000u;
+        system.Memory().Write32(target_address, instr);
+        system.InvalidateCacheRange(target_address, sizeof(u32));
+        break;
+    }
     case RelocationType::AlignedRelativeAddress:
-        // TODO(wwylele): implement other types
-        UNIMPLEMENTED();
+        system.Memory().Write32(target_address, 0);
+        system.InvalidateCacheRange(target_address, sizeof(u32));
         break;
     default:
         return CROFormatError(0x22);
