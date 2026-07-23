@@ -70,6 +70,15 @@ Path MakeNCCHFilePath(NCCHFileOpenType open_type, u32 content_index, NCCHFilePat
     return FileSys::Path(std::move(file));
 }
 
+NCCHArchive::NCCHArchive(u64 title_id, Service::FS::MediaType media_type)
+    : title_id(title_id), media_type(media_type) {
+    delay_generator = std::make_unique<RomFSDelayGenerator>();
+}
+
+NCCHArchive::NCCHArchive() {
+    delay_generator = std::make_unique<RomFSDelayGenerator>();
+}
+
 ResultVal<std::unique_ptr<FileBackend>> NCCHArchive::OpenFile(const Path& path, const Mode& mode,
                                                               u32 attributes) {
 

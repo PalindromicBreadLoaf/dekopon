@@ -24,7 +24,9 @@ enum class NANDArchiveType : u32 {
 class NANDArchive : public ArchiveBackend {
 public:
     explicit NANDArchive(const std::string& mount_point_, NANDArchiveType archive_type)
-        : mount_point(mount_point_) {}
+        : mount_point(mount_point_) {
+        delay_generator = std::make_unique<DefaultDelayGenerator>();
+    }
 
     std::string GetName() const override {
         return "NANDArchive: " + mount_point;
@@ -46,7 +48,9 @@ protected:
     std::string mount_point{};
     NANDArchiveType archive_type{};
 
-    NANDArchive() = default;
+    NANDArchive() {
+        delay_generator = std::make_unique<DefaultDelayGenerator>();
+    }
     template <class Archive>
     void serialize(Archive& ar, const unsigned int) {
         ar& boost::serialization::base_object<ArchiveBackend>(*this);

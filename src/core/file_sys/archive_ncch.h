@@ -43,8 +43,7 @@ Path MakeNCCHFilePath(NCCHFileOpenType open_type, u32 content_index, NCCHFilePat
 /// Archive backend for NCCH Archives (RomFS, ExeFS)
 class NCCHArchive : public ArchiveBackend {
 public:
-    explicit NCCHArchive(u64 title_id, Service::FS::MediaType media_type)
-        : title_id(title_id), media_type(media_type) {}
+    explicit NCCHArchive(u64 title_id, Service::FS::MediaType media_type);
 
     std::string GetName() const override {
         return "NCCHArchive";
@@ -67,7 +66,7 @@ protected:
     Service::FS::MediaType media_type;
 
 private:
-    NCCHArchive() = default;
+    NCCHArchive();
 
     template <class Archive>
     void serialize(Archive& ar, const unsigned int) {

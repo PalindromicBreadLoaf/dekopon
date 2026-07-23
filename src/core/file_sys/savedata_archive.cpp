@@ -35,6 +35,15 @@ public:
     SERIALIZE_DELAY_GENERATOR
 };
 
+SaveDataArchive::SaveDataArchive(const std::string& mount_point_, bool allow_zero_size_create_)
+    : mount_point(mount_point_), allow_zero_size_create(allow_zero_size_create_) {
+    delay_generator = std::make_unique<SaveDataDelayGenerator>();
+}
+
+SaveDataArchive::SaveDataArchive() {
+    delay_generator = std::make_unique<SaveDataDelayGenerator>();
+}
+
 ResultVal<std::unique_ptr<FileBackend>> SaveDataArchive::OpenFile(const Path& path,
                                                                   const Mode& mode,
                                                                   u32 attributes) {
