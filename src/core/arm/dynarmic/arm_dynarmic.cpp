@@ -330,16 +330,17 @@ void ARM_Dynarmic::SetPageTable(const std::shared_ptr<Memory::PageTable>& page_t
     }
 
     auto iter = jits.find(current_page_table);
-    if (iter != jits.end()) {
-        jit = iter->second.get();
-        LoadContext(ctx);
-        return;
+    if (iter == jits.end()) {
+        iter = jits.emplace(current_page_table, MakeJit()).first;
     }
-
-    auto new_jit = MakeJit();
-    jit = new_jit.get();
+    jit = iter->second.get();
     LoadContext(ctx);
-    jits.emplace(current_page_table, std::move(new_jit));
+
+    // The JIT built in the constructor predates every process, so it is keyed by a null page
+    // table and is abandoned the moment one loads.
+    if (current_page_table) {
+        jits.erase(nullptr);
+    }
 }
 
 void ARM_Dynarmic::ServeBreak([[maybe_unused]] int signal) {
@@ -360,6 +361,13 @@ std::unique_ptr<Dynarmic::A32::Jit> ARM_Dynarmic::MakeJit() {
     // Multi-process state
     config.processor_id = GetID();
     config.global_monitor = &exclusive_monitor.monitor;
+
+#ifdef __SWITCH__
+    // libnx backs a JIT region with an equally sized heap allocation, and dynarmic's per-block
+    // bookkeeping costs another two to three times the code it describes. At dynarmic's 128 MiB
+    // default a New 3DS title reserves four of these and exhausts the heap mid-game.
+    config.code_cache_size = 32 * 1024 * 1024;
+#endif
 
     return std::make_unique<Dynarmic::A32::Jit>(config);
 }
