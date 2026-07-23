@@ -622,7 +622,7 @@ FramebufferLayout FrameLayoutFromResolutionScale(u32 res_scale, bool is_secondar
             }
             layout = LargeFrameLayout(width, height, Settings::values.swap_screen.GetValue(),
                                       Settings::values.upright_screen.GetValue(), 1,
-                                      Settings::SmallScreenPosition::MiddleRight);
+                                      Settings::values.small_screen_position.GetValue());
             break;
         case Settings::LayoutOption::HybridScreen:
             height = Core::kScreenTopHeight * res_scale;
