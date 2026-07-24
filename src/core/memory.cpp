@@ -27,6 +27,10 @@
 #include "core/memory.h"
 #include "video_core/gpu.h"
 #include "video_core/renderer_base.h"
+#ifdef __SWITCH__
+#include "core/arm/dynarmic/horizon_arena.h"
+#include "core/arm/dynarmic/horizon_fastmem.h"
+#endif
 
 SERIALIZE_EXPORT_IMPL(Memory::MemorySystem::BackingMemImpl<Memory::Region::FCRAM>)
 SERIALIZE_EXPORT_IMPL(Memory::MemorySystem::BackingMemImpl<Memory::Region::VRAM>)
@@ -42,6 +46,69 @@ constexpr u32 SIGSEGV = 11;
 #endif
 
 namespace Memory {
+
+namespace {
+
+// Backing store for one guest RAM region.
+// On Switch with fastmem it is an AliasCodeData segment so it can be aliased into the guest arena.
+struct HostBacking {
+    u8* ptr = nullptr;
+    std::size_t size = 0;
+    std::unique_ptr<u8[]> heap;
+#ifdef __SWITCH__
+    void* alias_handle = nullptr;
+#endif
+
+    HostBacking() = default;
+    ~HostBacking() {
+        Free();
+    }
+    HostBacking(const HostBacking&) = delete;
+    HostBacking& operator=(const HostBacking&) = delete;
+
+    void Alloc(std::size_t bytes) {
+        size = bytes;
+#ifdef __SWITCH__
+        if (Settings::values.fastmem.GetValue() && Core::Horizon::Arena::IsSupported()) {
+            void* handle = nullptr;
+            if (u8* canonical = Core::Horizon::Arena::AllocAliasable(bytes, &handle)) {
+                ptr = canonical;
+                alias_handle = handle;
+                std::memset(ptr, 0, bytes);
+                return;
+            }
+        }
+#endif
+        heap = std::make_unique<u8[]>(bytes);
+        ptr = heap.get();
+    }
+
+    void Free() {
+#ifdef __SWITCH__
+        if (alias_handle) {
+            Core::Horizon::Arena::FreeAliasable(&alias_handle);
+            ptr = nullptr;
+            return;
+        }
+#endif
+        heap.reset();
+        ptr = nullptr;
+    }
+
+    u8* get() const {
+        return ptr;
+    }
+
+    bool aliasable() const {
+#ifdef __SWITCH__
+        return alias_handle != nullptr;
+#else
+        return false;
+#endif
+    }
+};
+
+}  // namespace
 
 void PageTable::Clear() {
     pointers.raw.fill(nullptr);
@@ -99,12 +166,11 @@ private:
 
 class MemorySystem::Impl {
 public:
-    // Visual Studio would try to allocate these on compile time
-    // if they are std::array which would exceed the memory limit.
-    std::unique_ptr<u8[]> fcram = std::make_unique<u8[]>(Memory::FCRAM_N3DS_SIZE);
-    std::unique_ptr<u8[]> vram = std::make_unique<u8[]>(Memory::VRAM_SIZE);
-    std::unique_ptr<u8[]> n3ds_extra_ram = std::make_unique<u8[]>(Memory::N3DS_EXTRA_RAM_SIZE);
-    std::unique_ptr<u8[]> dsp_ram = std::make_unique<u8[]>(Memory::DSP_RAM_SIZE);
+    // Allocated in the constructor body rather than inline.
+    HostBacking fcram;
+    HostBacking vram;
+    HostBacking n3ds_extra_ram;
+    HostBacking dsp_ram;
 
     Core::System& system;
     std::shared_ptr<PageTable> current_page_table = nullptr;
@@ -118,7 +184,179 @@ public:
 
     PAddr plugin_fb_address{};
 
+#ifdef __SWITCH__
+    // Guest fastmem arena (Switch only). One 4 GiB host reservation whose pages mirror the guest
+    // virtual layout of the arena-backed page table.
+    struct AliasSeg {
+        u8* base = nullptr;
+        std::size_t size = 0;
+    };
+    std::array<AliasSeg, 4> alias_segs{};
+    std::shared_ptr<PageTable> fastmem_pt_shared; // keeps the arena-backed table alive for teardown
+    PageTable* fastmem_pt_raw = nullptr;
+    u8* arena_base = nullptr;
+    void* arena_handle = nullptr;
+    std::size_t arena_size = 0;
+    // The kernel needs the exact (dest, source) pair to unmap, and reconciliation needs the previous source,
+    // so it is tracked explicitly rather than recomputed.
+    std::vector<u8*> arena_shadow;
+
+    std::uintptr_t ArenaVA(u32 page) const {
+        return reinterpret_cast<std::uintptr_t>(arena_base) +
+               static_cast<std::uint64_t>(page) * CITRA_PAGE_SIZE;
+    }
+
+    bool IsArenaSource(const u8* p) const {
+        if (!p) {
+            return false;
+        }
+        for (const auto& seg : alias_segs) {
+            if (seg.base && p >= seg.base && p < seg.base + seg.size) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Brings the arena into agreement with the page table's pointers over [page_base, page_base +
+    // num_pages). Contiguous runs collapse into single map/unmap calls to keep the kernel's block
+    // count down.
+    void UpdateArenaRange(PageTable& page_table, u32 page_base, u32 num_pages) {
+        if (&page_table != fastmem_pt_raw || !arena_base) {
+            return;
+        }
+        auto& raw = page_table.GetPointerArray();
+        const auto desired = [&](u32 p) -> u8* {
+            u8* r = raw[p];
+            return IsArenaSource(r) ? r : nullptr;
+        };
+        const u32 end = page_base + num_pages;
+
+        // Drop aliases whose source changed or went away.
+        for (u32 p = page_base; p < end;) {
+            u8* const cur = arena_shadow[p];
+            if (!cur || cur == desired(p)) {
+                ++p;
+                continue;
+            }
+            u32 k = p;
+            while (k < end) {
+                u8* const ck = arena_shadow[k];
+                if (!ck || ck == desired(k) ||
+                    ck != cur + static_cast<std::uint64_t>(k - p) * CITRA_PAGE_SIZE) {
+                    break;
+                }
+                ++k;
+            }
+            Core::Horizon::Arena::UnmapAlias(ArenaVA(p), reinterpret_cast<std::uintptr_t>(cur),
+                                             static_cast<std::size_t>(k - p) * CITRA_PAGE_SIZE);
+            for (u32 j = p; j < k; ++j) {
+                arena_shadow[j] = nullptr;
+            }
+            p = k;
+        }
+
+        // Add aliases for sources newly present.
+        for (u32 p = page_base; p < end;) {
+            if (arena_shadow[p]) {
+                ++p;
+                continue;
+            }
+            u8* const des = desired(p);
+            if (!des) {
+                ++p;
+                continue;
+            }
+            u32 k = p;
+            while (k < end && !arena_shadow[k] &&
+                   desired(k) == des + static_cast<std::uint64_t>(k - p) * CITRA_PAGE_SIZE) {
+                ++k;
+            }
+            if (Core::Horizon::Arena::MapAlias(ArenaVA(p), reinterpret_cast<std::uintptr_t>(des),
+                                               static_cast<std::size_t>(k - p) * CITRA_PAGE_SIZE)) {
+                for (u32 j = p; j < k; ++j) {
+                    arena_shadow[j] = des + static_cast<std::uint64_t>(j - p) * CITRA_PAGE_SIZE;
+                }
+            }
+            p = k;
+        }
+    }
+
+    void EnableFastmem(PageTable& page_table) {
+        if (fastmem_pt_raw || !Settings::values.fastmem.GetValue() ||
+            !Core::Horizon::Arena::IsSupported()) {
+            return;
+        }
+        if (!fcram.aliasable()) {
+            LOG_WARNING(HW_Memory,
+                        "Fastmem requested but guest RAM is not aliasable.");
+            return;
+        }
+
+        constexpr std::size_t ARENA_SIZE = std::size_t{1} << 32;
+        void* handle = nullptr;
+        u8* const base = Core::Horizon::Arena::ReserveArena(ARENA_SIZE, &handle);
+        if (!base) {
+            LOG_WARNING(HW_Memory, "Could not reserve the fastmem arena.");
+            return;
+        }
+
+        arena_base = base;
+        arena_handle = handle;
+        arena_size = ARENA_SIZE;
+        arena_shadow.assign(PAGE_TABLE_NUM_ENTRIES, nullptr);
+        for (auto& sp : page_table_list) {
+            if (sp.get() == &page_table) {
+                fastmem_pt_shared = sp;
+                break;
+            }
+        }
+        fastmem_pt_raw = &page_table;
+        Core::HorizonFastmem::SetActiveArena(reinterpret_cast<std::uintptr_t>(base), ARENA_SIZE);
+        UpdateArenaRange(page_table, 0, PAGE_TABLE_NUM_ENTRIES);
+        LOG_INFO(HW_Memory, "Fastmem arena: 4096 MiB at 0x{:016X}",
+                 reinterpret_cast<std::uintptr_t>(base));
+    }
+
+    std::uintptr_t GetFastmemBase(const PageTable& page_table) const {
+        return (&page_table == fastmem_pt_raw && arena_base)
+                   ? reinterpret_cast<std::uintptr_t>(arena_base)
+                   : 0;
+    }
+
+    void TeardownFastmem() {
+        if (!arena_base) {
+            return;
+        }
+        Core::HorizonFastmem::SetActiveArena(0, 0);
+        for (u32 p = 0; p < PAGE_TABLE_NUM_ENTRIES;) {
+            u8* const src = arena_shadow[p];
+            if (!src) {
+                ++p;
+                continue;
+            }
+            u32 k = p;
+            while (k < PAGE_TABLE_NUM_ENTRIES &&
+                   arena_shadow[k] == src + static_cast<std::uint64_t>(k - p) * CITRA_PAGE_SIZE) {
+                ++k;
+            }
+            Core::Horizon::Arena::UnmapAlias(ArenaVA(p), reinterpret_cast<std::uintptr_t>(src),
+                                             static_cast<std::size_t>(k - p) * CITRA_PAGE_SIZE);
+            for (u32 j = p; j < k; ++j) {
+                arena_shadow[j] = nullptr;
+            }
+            p = k;
+        }
+        Core::Horizon::Arena::ReleaseArena(&arena_handle);
+        arena_base = nullptr;
+        arena_size = 0;
+        fastmem_pt_raw = nullptr;
+        fastmem_pt_shared.reset();
+    }
+#endif
+
     Impl(Core::System& system_);
+    ~Impl();
 
     const u8* GetPtr(Region r) const {
         switch (r) {
@@ -397,7 +635,29 @@ MemorySystem::Impl::Impl(Core::System& system_)
     : system{system_}, fcram_mem(std::make_shared<BackingMemImpl<Region::FCRAM>>(*this)),
       vram_mem(std::make_shared<BackingMemImpl<Region::VRAM>>(*this)),
       n3ds_extra_ram_mem(std::make_shared<BackingMemImpl<Region::N3DS>>(*this)),
-      dsp_mem(std::make_shared<BackingMemImpl<Region::DSP>>(*this)) {}
+      dsp_mem(std::make_shared<BackingMemImpl<Region::DSP>>(*this)) {
+    fcram.Alloc(Memory::FCRAM_N3DS_SIZE);
+    vram.Alloc(Memory::VRAM_SIZE);
+    n3ds_extra_ram.Alloc(Memory::N3DS_EXTRA_RAM_SIZE);
+    dsp_ram.Alloc(Memory::DSP_RAM_SIZE);
+
+#ifdef __SWITCH__
+    // Record which backings landed in the aliasable state.
+    const auto seg = [](const HostBacking& b) -> AliasSeg {
+        return b.aliasable() ? AliasSeg{b.get(), b.size} : AliasSeg{};
+    };
+    alias_segs[0] = seg(fcram);
+    alias_segs[1] = seg(vram);
+    alias_segs[2] = seg(n3ds_extra_ram);
+    alias_segs[3] = seg(dsp_ram);
+#endif
+}
+
+MemorySystem::Impl::~Impl() {
+#ifdef __SWITCH__
+    TeardownFastmem();
+#endif
+}
 
 MemorySystem::MemorySystem(Core::System& system) : impl(std::make_unique<Impl>(system)) {}
 MemorySystem::~MemorySystem() = default;
@@ -464,6 +724,10 @@ void MemorySystem::RegisterWatchpoint(const Kernel::Process& process, VAddr addr
                  PageTable::WatchpointPageInfo{.watchpoint_count = 1, .memory = std::move(mem)}});
         }
 
+#ifdef __SWITCH__
+        // A watchpoint page must fault on the fast path so the slow path can check it.
+        impl->UpdateArenaRange(page_table, static_cast<u32>(page_index), 1);
+#endif
         current = page_base + CITRA_PAGE_SIZE;
     }
 }
@@ -503,6 +767,9 @@ void MemorySystem::UnregisterWatchpoint(const Kernel::Process& process, VAddr ad
             LOG_ERROR(HW_Memory, "No watchpoint found on page 0x{:08X}", page_base);
         }
 
+#ifdef __SWITCH__
+        impl->UpdateArenaRange(page_table, static_cast<u32>(page_index), 1);
+#endif
         current = page_base + CITRA_PAGE_SIZE;
     }
 }
@@ -517,6 +784,8 @@ void MemorySystem::MapPages(PageTable& page_table, u32 base, u32 size, MemoryRef
                                      FlushMode::FlushAndInvalidate);
     }
 
+    const u32 page_base = base;
+    const u32 page_count = size;
     u32 end = base + size;
     while (base != end) {
         ASSERT_MSG(base < PAGE_TABLE_NUM_ENTRIES, "out of range mapping at {:08X}", base);
@@ -534,6 +803,13 @@ void MemorySystem::MapPages(PageTable& page_table, u32 base, u32 size, MemoryRef
         if (memory != nullptr && memory.GetSize() > CITRA_PAGE_SIZE)
             memory += CITRA_PAGE_SIZE;
     }
+
+#ifdef __SWITCH__
+    impl->UpdateArenaRange(page_table, page_base, page_count);
+#else
+    (void)page_base;
+    (void)page_count;
+#endif
 }
 
 void MemorySystem::MapMemoryRegion(PageTable& page_table, VAddr base, u32 size, MemoryRef target) {
@@ -555,6 +831,23 @@ MemoryRef MemorySystem::GetPointerForRasterizerCache(VAddr addr) const {
 
 void MemorySystem::RegisterPageTable(std::shared_ptr<PageTable> page_table) {
     impl->page_table_list.push_back(page_table);
+}
+
+void MemorySystem::EnableFastmem(PageTable& page_table) {
+#ifdef __SWITCH__
+    impl->EnableFastmem(page_table);
+#else
+    (void)page_table;
+#endif
+}
+
+std::uintptr_t MemorySystem::GetFastmemBase(const PageTable& page_table) const {
+#ifdef __SWITCH__
+    return impl->GetFastmemBase(page_table);
+#else
+    (void)page_table;
+    return 0;
+#endif
 }
 
 void MemorySystem::UnregisterPageTable(std::shared_ptr<PageTable> page_table) {
@@ -1038,6 +1331,12 @@ void MemorySystem::RasterizerMarkRegionCached(PAddr start, u32 size, bool cached
                         UNREACHABLE();
                     }
                 }
+
+#ifdef __SWITCH__
+                // A page that just became cached must fault on the fast path so the flush runs;
+                // one that became uncached must be reachable again.
+                impl->UpdateArenaRange(*page_table, vaddr >> CITRA_PAGE_BITS, 1);
+#endif
             }
         }
     }

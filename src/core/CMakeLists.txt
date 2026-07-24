@@ -556,6 +556,17 @@ if ("x86_64" IN_LIST ARCHITECTURE OR "arm64" IN_LIST ARCHITECTURE)
         arm/dynarmic/arm_tick_counts.cpp
         arm/dynarmic/arm_tick_counts.h
     )
+    if (DEKOPON)
+        target_sources(citra_core PRIVATE
+            arm/dynarmic/horizon_fastmem.cpp
+            arm/dynarmic/horizon_fastmem.h
+            arm/dynarmic/horizon_arena.cpp
+            arm/dynarmic/horizon_arena.h
+        )
+        # horizon_arena.cpp includes <switch.h>, whose types collide with the core/common headers.
+        set_source_files_properties(arm/dynarmic/horizon_arena.cpp PROPERTIES
+            SKIP_PRECOMPILE_HEADERS ON)
+    endif()
     target_link_libraries(citra_core PRIVATE dynarmic)
 endif()
 

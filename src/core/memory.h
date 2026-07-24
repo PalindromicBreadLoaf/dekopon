@@ -5,6 +5,7 @@
 #pragma once
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <boost/serialization/array.hpp>
@@ -686,6 +687,17 @@ public:
 
     /// Gets a serializable ref to FCRAM with the given offset
     MemoryRef GetFCRAMRef(std::size_t offset) const;
+
+    /**
+     * Switch fastmem. Designate `page_table` as the arena-backed table, reserve the 4 GiB host arena,
+     * and mirror its currently mapped pages into it so the JIT reaches guest RAM without a page-table walk.
+     */
+    void EnableFastmem(PageTable& page_table);
+
+    /**
+     * Host base address of the fastmem arena for `page_table`.
+     */
+    std::uintptr_t GetFastmemBase(const PageTable& page_table) const;
 
     /// Registers page table for rasterizer cache marking
     void RegisterPageTable(std::shared_ptr<PageTable> page_table);

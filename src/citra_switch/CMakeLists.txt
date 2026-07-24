@@ -1,3 +1,7 @@
+# The replacement __libnx_exception_entry is hand-written AArch64.
+# And yes, this took as long as you'd expect it to.
+enable_language(ASM)
+
 # Dekopon frontend
 add_executable(citra_switch
     applets/swkbd.cpp
@@ -12,6 +16,11 @@ add_executable(citra_switch
     emu_window.h
     emulation.cpp
     harfbuzz_stubs.cpp
+    # The exception entry stub must be a strong symbol in the executable itself so the linker picks
+    # it over libnx's weak __libnx_exception_entry.
+    horizon_exception.cpp
+    horizon_exception_entry.S
+    horizon_exception_entry.h
     horizon_sys_stubs.cpp
     input.cpp
     input.h

@@ -446,6 +446,9 @@ System::ResultStatus System::Load(Frontend::EmuWindow& emu_window, const std::st
             return ResultStatus::ErrorLoader;
         }
     }
+    // Designate the application's page table as the fastmem arena before SetCurrentProcess creates
+    // its JIT, so the JIT is built with config.fastmem_pointer set.
+    memory->EnableFastmem(*process->vm_manager.page_table);
     kernel->SetCurrentProcess(process);
     title_id = 0;
     if (app_loader->ReadProgramId(title_id) != Loader::ResultStatus::Success) {

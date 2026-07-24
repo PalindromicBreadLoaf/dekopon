@@ -356,6 +356,12 @@ std::unique_ptr<Dynarmic::A32::Jit> ARM_Dynarmic::MakeJit() {
     config.callbacks = cb.get();
     if (current_page_table) {
         config.page_table = &current_page_table->GetPointerArray();
+        // On Switch the application's page table is mirrored into a 4 GiB host arena.
+        // Point the JIT at it so loads and stores skip the page-table walk. A fault
+        // recompiles the block onto the page-table path above. Zero elsewhere.
+        if (const std::uintptr_t fastmem_base = memory.GetFastmemBase(*current_page_table)) {
+            config.fastmem_pointer = fastmem_base;
+        }
     }
     config.coprocessors[15] = std::make_shared<DynarmicCP15>(cp15_state);
     config.define_unpredictable_behaviour = true;
