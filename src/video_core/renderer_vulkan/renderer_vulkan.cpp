@@ -1639,6 +1639,9 @@ RendererVulkan::OverlayDraw RendererVulkan::PrepareFpsOverlay(
 
 RendererVulkan::OverlayDraw RendererVulkan::PrepareShaderNotice(
     const Layout::FramebufferLayout& layout) {
+    if (!Settings::values.show_shader_compile_notice.GetValue()) {
+        return {};
+    }
     const u32 pending = VideoCore::GetPendingShaderCompiles();
     const auto now = std::chrono::steady_clock::now();
     if (pending > 0) {

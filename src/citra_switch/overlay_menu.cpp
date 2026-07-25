@@ -33,6 +33,7 @@ enum class Item {
     OverlaySize,
     OverlayOpacity,
     FpsCounter,
+    ShaderCompileNotice,
     CustomTextures,
     DisableRightEyeRender,
     PointerSource,
@@ -176,6 +177,7 @@ void RebuildRows() {
             s_rows.push_back({Item::OverlayOpacity});
         }
         s_rows.push_back({Item::FpsCounter});
+        s_rows.push_back({Item::ShaderCompileNotice});
         s_rows.push_back({Item::CustomTextures});
         s_rows.push_back({Item::DisableRightEyeRender});
         break;
@@ -248,6 +250,8 @@ std::string Label(const Row& row) {
         return "Pointer Mode";
     case Item::FpsCounter:
         return "FPS Counter";
+    case Item::ShaderCompileNotice:
+        return "Shader Compile Notice";
     case Item::CustomTextures:
         return "Custom Textures";
     case Item::DisableRightEyeRender:
@@ -290,6 +294,8 @@ std::string Value(const Row& row) {
         return IsPointerModeActive() ? "On" : "Off";
     case Item::FpsCounter:
         return Settings::values.show_fps.GetValue() ? "On" : "Off";
+    case Item::ShaderCompileNotice:
+        return Settings::values.show_shader_compile_notice.GetValue() ? "On" : "Off";
     case Item::CustomTextures:
         return Settings::values.custom_textures.GetValue() ? "On" : "Off";
     case Item::DisableRightEyeRender:
@@ -339,6 +345,9 @@ void Adjust(const Row& row, int dir) {
     case Item::FpsCounter:
         Settings::values.show_fps = dir > 0;
         break;
+    case Item::ShaderCompileNotice:
+        Settings::values.show_shader_compile_notice = dir > 0;
+        break;
     case Item::CustomTextures:
         Settings::values.custom_textures = dir > 0;
         break;
@@ -374,6 +383,10 @@ void Activate(const Row& row) {
         break;
     case Item::FpsCounter:
         Settings::values.show_fps = !Settings::values.show_fps.GetValue();
+        break;
+    case Item::ShaderCompileNotice:
+        Settings::values.show_shader_compile_notice =
+            !Settings::values.show_shader_compile_notice.GetValue();
         break;
     case Item::CustomTextures:
         Settings::values.custom_textures = !Settings::values.custom_textures.GetValue();

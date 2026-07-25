@@ -142,6 +142,7 @@ private:
         ReadSetting("Renderer", Settings::values.filter_mode);
         ReadSetting("Renderer", Settings::values.use_integer_scaling);
         ReadSetting("Renderer", Settings::values.show_fps);
+        ReadSetting("Renderer", Settings::values.show_shader_compile_notice);
         ReadSetting("Renderer", Settings::values.use_shader_jit);
         ReadSetting("Renderer", Settings::values.disable_right_eye_render);
 
@@ -227,6 +228,8 @@ private:
         ss << "use_integer_scaling = " << (v.use_integer_scaling.GetValue() ? "true" : "false")
            << '\n';
         ss << "show_fps = " << (v.show_fps.GetValue() ? "true" : "false") << '\n';
+        ss << "show_shader_compile_notice = "
+           << (v.show_shader_compile_notice.GetValue() ? "true" : "false") << '\n';
         ss << "use_shader_jit = " << (v.use_shader_jit.GetValue() ? "true" : "false") << '\n';
         ss << "disable_right_eye_render = "
            << (v.disable_right_eye_render.GetValue() ? "true" : "false") << "\n\n";

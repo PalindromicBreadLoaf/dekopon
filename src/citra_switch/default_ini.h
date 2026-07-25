@@ -43,6 +43,8 @@ filter_mode =
 use_integer_scaling =
 # Show an on-screen frame-rate counter (0, default).
 show_fps = false
+# Show the "Compiling shaders" notice during gameplay while shaders are being compiled (0, default).
+show_shader_compile_notice = false
 # Compile PICA vertex shaders to native code instead of interpreting them (1, default).
 # Only affects draws that fall back to the CPU shader engine.
 # Has chance of crashing on some games, although should be safe.

@@ -585,6 +585,7 @@ enum SettingRowIdx {
     SettingRowLinearFiltering,
     SettingRowIntegerScaling,
     SettingRowShowFps,
+    SettingRowShowShaderCompileNotice,
     SettingRowDisableRightEye,
     SettingRowCpuClock,
     SettingRowNew3ds,
@@ -613,6 +614,7 @@ std::vector<SettingRow> BuildSettingRows(const MenuSettings& s) {
         {"Linear Filtering", s.filter_mode ? "On" : "Off"},
         {"Integer Scaling", s.use_integer_scaling ? "On" : "Off"},
         {"Show FPS Counter", s.show_fps ? "On" : "Off"},
+        {"Shader Compile Notice", s.show_shader_compile_notice ? "On" : "Off"},
         {"Disable Right Eye Render", s.disable_right_eye_render ? "On" : "Off"},
         {"CPU Clock", std::to_string(s.cpu_clock_percentage) + "%"},
         {"New 3DS Mode", s.is_new_3ds ? "On" : "Off"},
@@ -663,6 +665,9 @@ void CycleSetting(MenuSettings& s, int idx, int dir) {
         break;
     case SettingRowShowFps:
         s.show_fps = dir > 0;
+        break;
+    case SettingRowShowShaderCompileNotice:
+        s.show_shader_compile_notice = dir > 0;
         break;
     case SettingRowDisableRightEye:
         s.disable_right_eye_render = dir > 0;

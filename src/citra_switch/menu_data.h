@@ -89,6 +89,7 @@ struct MenuSettings {
     bool filter_mode{};           // Linear (on) or nearest-neighbour (off) screen sampling.
     bool use_integer_scaling{};   // Scale the screen by whole-number factors only.
     bool show_fps{};              // On-screen framerate counter.
+    bool show_shader_compile_notice{};
     bool disable_right_eye_render{};
     bool preload_textures{};      // Load the whole custom texture pack up front.
     bool dump_textures{};         // Write the game's textures out to disk.

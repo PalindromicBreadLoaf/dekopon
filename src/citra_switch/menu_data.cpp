@@ -474,6 +474,7 @@ MenuSettings GetMenuSettings() {
         .filter_mode = v.filter_mode.GetValue(),
         .use_integer_scaling = v.use_integer_scaling.GetValue(),
         .show_fps = v.show_fps.GetValue(),
+        .show_shader_compile_notice = v.show_shader_compile_notice.GetValue(),
         .disable_right_eye_render = v.disable_right_eye_render.GetValue(),
         .preload_textures = v.preload_textures.GetValue(),
         .dump_textures = v.dump_textures.GetValue(),
@@ -503,6 +504,7 @@ void SetMenuSettings(const MenuSettings& s) {
     v.filter_mode = s.filter_mode;
     v.use_integer_scaling = s.use_integer_scaling;
     v.show_fps = s.show_fps;
+    v.show_shader_compile_notice = s.show_shader_compile_notice;
     v.disable_right_eye_render = s.disable_right_eye_render;
     v.preload_textures = s.preload_textures;
     v.dump_textures = s.dump_textures;
