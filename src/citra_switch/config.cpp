@@ -109,6 +109,9 @@ void VisitPersistedSettings(Visitor&& visit) {
     visit("Layout", v.bg_red);
     visit("Layout", v.bg_green);
     visit("Layout", v.bg_blue);
+    visit("Layout", v.cardboard_screen_size);
+    visit("Layout", v.cardboard_x_shift);
+    visit("Layout", v.cardboard_y_shift);
 
     visit("Audio", v.audio_emulation);
     visit("Audio", v.volume);
@@ -212,17 +215,30 @@ private:
 
     template <typename Type, bool ranged>
     void ReadSetting(const std::string& group, Settings::Setting<Type, ranged>& setting) {
+        Type default_value = setting.GetDefault();
+        if constexpr (std::is_integral_v<Type> && !std::is_same_v<Type, bool>) {
+            if (group == "Renderer" &&
+                setting.GetLabel() == Settings::values.factor_3d.GetLabel()) {
+                default_value = static_cast<Type>(60);
+            } else if (group == "Layout" &&
+                       setting.GetLabel() == Settings::values.cardboard_x_shift.GetLabel()) {
+                default_value = static_cast<Type>(35);
+            } else if (group == "Layout" &&
+                       setting.GetLabel() == Settings::values.cardboard_y_shift.GetLabel()) {
+                default_value = static_cast<Type>(0);
+            }
+        }
+
         if constexpr (std::is_same_v<Type, std::string>) {
-            std::string value = config->Get(group, setting.GetLabel(), setting.GetDefault());
-            setting = value.empty() ? setting.GetDefault() : std::move(value);
+            std::string value = config->Get(group, setting.GetLabel(), default_value);
+            setting = value.empty() ? default_value : std::move(value);
         } else if constexpr (std::is_same_v<Type, bool>) {
-            setting = config->GetBoolean(group, setting.GetLabel(), setting.GetDefault());
+            setting = config->GetBoolean(group, setting.GetLabel(), default_value);
         } else if constexpr (std::is_floating_point_v<Type>) {
-            setting =
-                static_cast<Type>(config->GetReal(group, setting.GetLabel(), setting.GetDefault()));
+            setting = static_cast<Type>(config->GetReal(group, setting.GetLabel(), default_value));
         } else {
             setting = static_cast<Type>(config->GetInteger(
-                group, setting.GetLabel(), static_cast<long>(setting.GetDefault())));
+                group, setting.GetLabel(), static_cast<long>(default_value)));
         }
     }
 

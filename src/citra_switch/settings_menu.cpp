@@ -61,7 +61,7 @@ constexpr std::array<const char*, 3> kAudioEmulationNames{"HLE", "LLE", "LLE (mu
 
 constexpr std::array<const char*, 7> kStereoNames{
     "Off",        "Side by side",       "Side by side (full)", "Anaglyph",
-    "Interlaced", "Reverse interlaced", "Cardboard VR"};
+    "Interlaced", "Reverse interlaced", "Nintendo Labo VR"};
 
 constexpr std::array<const char*, 2> kMonoEyeNames{"Left eye", "Right eye"};
 
@@ -151,6 +151,42 @@ SettingsRow Choice(const char* label, S& setting, const std::array<const char*, 
                 setting = static_cast<ValueOf<S>>(std::clamp(
                     static_cast<int>(setting.GetValue()) + dir, 0, static_cast<int>(N) - 1));
             }};
+}
+
+SettingsRow StereoModeRow() {
+    SettingsRow row = Choice("Stereoscopic 3D", Settings::values.render_3d, kStereoNames);
+    row.step = [step = std::move(row.step)](int dir) {
+        step(dir);
+        if (Settings::values.render_3d.GetValue() != Settings::StereoRenderOption::Off) {
+            // A zeroed 3DS depth slider produces two identical images, which makes a newly enabled
+            // headset mode look broken.
+            if (Settings::values.factor_3d.GetValue() == 0) {
+                Settings::values.factor_3d = 60;
+            }
+            Settings::values.disable_right_eye_render = false;
+        }
+    };
+    return Relayout(std::move(row));
+}
+
+SettingsRow DisableRightEyeRow() {
+    auto& setting = Settings::values.disable_right_eye_render;
+    const auto stereo_is_off = [] {
+        return Settings::values.render_3d.GetValue() == Settings::StereoRenderOption::Off;
+    };
+    return {
+        "Disable Right Eye Render",
+        [&setting, stereo_is_off] {
+            return stereo_is_off() ? BoolText(setting.GetValue()) : std::string{"Required for 3D"};
+        },
+        [&setting, stereo_is_off](int dir) {
+            if (stereo_is_off()) {
+                setting = dir > 0;
+            }
+        },
+        SettingsModal::None,
+        [&setting, stereo_is_off] { return stereo_is_off() && setting.GetValue(); },
+    };
 }
 
 // A 0..1 float shown as a whole-number percentage.
@@ -461,11 +497,14 @@ std::vector<SettingsRow> BuildSettingsPage(SettingsPage page) {
             Toggle("Integer Scaling", v.use_integer_scaling),
             Toggle("Linear Filtering", v.filter_mode),
             Choice("Texture Filter", v.texture_filter, kTextureFilterNames),
-            Choice("Stereoscopic 3D", v.render_3d, kStereoNames),
+            StereoModeRow(),
             Number("Stereoscopic Depth", v.factor_3d, 0, 100, 5, "%"),
             Toggle("Swap Eyes", v.swap_eyes_3d),
+            Relayout(Number("Labo VR Image Size", v.cardboard_screen_size, 30, 100, 5, "%")),
+            Relayout(Number("Labo VR Horizontal Align", v.cardboard_x_shift, -100, 100, 5, "%")),
+            Relayout(Number("Labo VR Vertical Align", v.cardboard_y_shift, -100, 100, 5, "%")),
             Choice("Eye Rendered In 2D", v.mono_render_option, kMonoEyeNames),
-            Toggle("Disable Right Eye Render", v.disable_right_eye_render),
+            DisableRightEyeRow(),
             Toggle("Custom Textures", v.custom_textures),
             Toggle("Preload Custom Textures", v.preload_textures),
             Toggle("Async Custom Texture Loading", v.async_custom_loading),
@@ -579,11 +618,14 @@ std::vector<SettingsRow> BuildQuickPage(QuickPage page) {
         };
     case QuickPage::Stereo:
         return {
-            Relayout(Choice("Stereoscopic 3D", v.render_3d, kStereoNames)),
+            StereoModeRow(),
             Number("Stereoscopic Depth", v.factor_3d, 0, 100, 5, "%"),
             Toggle("Swap Eyes", v.swap_eyes_3d),
+            Relayout(Number("Labo VR Image Size", v.cardboard_screen_size, 30, 100, 5, "%")),
+            Relayout(Number("Labo VR Horizontal Align", v.cardboard_x_shift, -100, 100, 5, "%")),
+            Relayout(Number("Labo VR Vertical Align", v.cardboard_y_shift, -100, 100, 5, "%")),
             Choice("Eye Rendered In 2D", v.mono_render_option, kMonoEyeNames),
-            Toggle("Disable Right Eye Render", v.disable_right_eye_render),
+            DisableRightEyeRow(),
         };
     case QuickPage::Audio:
         return {

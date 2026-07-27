@@ -4,6 +4,7 @@ add_executable(tests
     common/param_package.cpp
     core/core_timing.cpp
     core/file_sys/path_parser.cpp
+    core/frontend/framebuffer_layout.cpp
     core/hle/kernel/hle_ipc.cpp
     core/memory/memory.cpp
     core/memory/vm_manager.cpp

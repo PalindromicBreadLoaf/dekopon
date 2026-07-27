@@ -775,10 +775,10 @@ void RendererOpenGL::DrawTopScreen(const Layout::FramebufferLayout& layout,
         DrawSingleScreen(screen_infos[leftside], top_screen_left, top_screen_top, top_screen_width,
                          top_screen_height, orientation);
         glUniform1i(uniform_layer, 1);
-        DrawSingleScreen(
-            screen_infos[rightside],
-            static_cast<float>(layout.cardboard.top_screen_right_eye + (layout.width / 2)),
-            top_screen_top, top_screen_width, top_screen_height, orientation);
+        DrawSingleScreen(screen_infos[rightside],
+                         top_screen_left - 2.0f * layout.cardboard.user_x_shift +
+                             (layout.width / 2),
+                         top_screen_top, top_screen_width, top_screen_height, orientation);
         break;
     }
     case Settings::StereoRenderOption::Anaglyph:
@@ -834,10 +834,10 @@ void RendererOpenGL::DrawBottomScreen(const Layout::FramebufferLayout& layout,
         DrawSingleScreen(screen_infos[2], bottom_screen_left, bottom_screen_top,
                          bottom_screen_width, bottom_screen_height, orientation);
         glUniform1i(uniform_layer, 1);
-        DrawSingleScreen(
-            screen_infos[2],
-            static_cast<float>(layout.cardboard.bottom_screen_right_eye + (layout.width / 2)),
-            bottom_screen_top, bottom_screen_width, bottom_screen_height, orientation);
+        DrawSingleScreen(screen_infos[2],
+                         bottom_screen_left - 2.0f * layout.cardboard.user_x_shift +
+                             (layout.width / 2),
+                         bottom_screen_top, bottom_screen_width, bottom_screen_height, orientation);
         break;
     }
     case Settings::StereoRenderOption::Anaglyph:

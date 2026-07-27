@@ -2,6 +2,7 @@
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
 
+#include <algorithm>
 #include <cmath>
 
 #include "common/assert.h"
@@ -661,87 +662,91 @@ FramebufferLayout FrameLayoutFromResolutionScale(u32 res_scale, bool is_secondar
 }
 
 FramebufferLayout GetCardboardSettings(const FramebufferLayout& layout) {
-    u32 top_screen_left = 0;
-    u32 top_screen_top = 0;
-    u32 bottom_screen_left = 0;
-    u32 bottom_screen_top = 0;
-
-    u32 cardboard_screen_scale = Settings::values.cardboard_screen_size.GetValue();
-    u32 top_screen_width = ((layout.top_screen.GetWidth() / 2) * cardboard_screen_scale) / 100;
-    u32 top_screen_height = ((layout.top_screen.GetHeight() / 2) * cardboard_screen_scale) / 100;
-    u32 bottom_screen_width =
-        ((layout.bottom_screen.GetWidth() / 2) * cardboard_screen_scale) / 100;
-    u32 bottom_screen_height =
-        ((layout.bottom_screen.GetHeight() / 2) * cardboard_screen_scale) / 100;
-    const bool is_swapped = Settings::values.swap_screen.GetValue();
-    const bool is_portrait = layout.height > layout.width;
-
-    u32 cardboard_screen_width;
-    u32 cardboard_screen_height;
-    if (is_portrait) {
-        switch (Settings::values.portrait_layout_option.GetValue()) {
-        case Settings::PortraitLayoutOption::PortraitTopFullWidth:
-        case Settings::PortraitLayoutOption::PortraitOriginal:
-            cardboard_screen_width = top_screen_width;
-            cardboard_screen_height = top_screen_height + bottom_screen_height;
-            bottom_screen_left += (top_screen_width - bottom_screen_width) / 2;
-            if (is_swapped)
-                top_screen_top += bottom_screen_height;
-            else
-                bottom_screen_top += top_screen_height;
-            break;
-        default:
-            cardboard_screen_width = is_swapped ? bottom_screen_width : top_screen_width;
-            cardboard_screen_height = is_swapped ? bottom_screen_height : top_screen_height;
+    // Labo headsets divide the host panel into one viewport per eye. Scale the complete
+    // configured layout into a viewport instead of rebuilding a few selected layouts by hand.
+    Common::Rectangle<u32> content_bounds{};
+    bool have_content = false;
+    const auto include = [&](const Common::Rectangle<u32>& screen, bool enabled) {
+        if (!enabled) {
+            return;
         }
-    } else {
-        switch (Settings::values.layout_option.GetValue()) {
-        case Settings::LayoutOption::SideScreen:
-            cardboard_screen_width = top_screen_width + bottom_screen_width;
-            cardboard_screen_height = is_swapped ? bottom_screen_height : top_screen_height;
-            if (is_swapped)
-                top_screen_left += bottom_screen_width;
-            else
-                bottom_screen_left += top_screen_width;
-            break;
-
-        case Settings::LayoutOption::SingleScreen:
-        default:
-
-            cardboard_screen_width = is_swapped ? bottom_screen_width : top_screen_width;
-            cardboard_screen_height = is_swapped ? bottom_screen_height : top_screen_height;
-            break;
+        if (!have_content) {
+            content_bounds = screen;
+            have_content = true;
+            return;
         }
+        content_bounds.left = std::min(content_bounds.left, screen.left);
+        content_bounds.top = std::min(content_bounds.top, screen.top);
+        content_bounds.right = std::max(content_bounds.right, screen.right);
+        content_bounds.bottom = std::max(content_bounds.bottom, screen.bottom);
+    };
+    include(layout.top_screen, layout.top_screen_enabled);
+    include(layout.bottom_screen, layout.bottom_screen_enabled);
+    include(layout.additional_screen, layout.additional_screen_enabled);
+
+    if (!have_content || content_bounds.GetWidth() == 0 || content_bounds.GetHeight() == 0) {
+        return layout;
     }
-    s32 cardboard_max_x_shift = (layout.width / 2 - cardboard_screen_width) / 2;
-    s32 cardboard_user_x_shift =
-        (Settings::values.cardboard_x_shift.GetValue() * cardboard_max_x_shift) / 100;
-    s32 cardboard_max_y_shift = (layout.height - cardboard_screen_height) / 2;
-    s32 cardboard_user_y_shift =
-        (Settings::values.cardboard_y_shift.GetValue() * cardboard_max_y_shift) / 100;
 
-    // Center the screens and apply user Y shift
+    const u32 eye_width = layout.width / 2;
+    const u32 scale_percent =
+        std::clamp(Settings::values.cardboard_screen_size.GetValue(), 30u, 100u);
+    const float scale = static_cast<float>(scale_percent) / 200.0f;
+    const u32 content_width =
+        std::max(1u, static_cast<u32>(std::lround(content_bounds.GetWidth() * scale)));
+    const u32 content_height =
+        std::max(1u, static_cast<u32>(std::lround(content_bounds.GetHeight() * scale)));
+
+    const s32 centered_x =
+        std::max(0, (static_cast<s32>(eye_width) - static_cast<s32>(content_width)) / 2);
+    const s32 centered_y =
+        std::max(0, (static_cast<s32>(layout.height) - static_cast<s32>(content_height)) / 2);
+    const s32 horizontal_percent =
+        std::clamp(Settings::values.cardboard_x_shift.GetValue(), -100, 100);
+    const s32 vertical_percent =
+        std::clamp(Settings::values.cardboard_y_shift.GetValue(), -100, 100);
+    const s32 user_x_shift = horizontal_percent * centered_x / 100;
+    const s32 user_y_shift = vertical_percent * centered_y / 100;
+
+    const auto scale_x = [&](u32 x) {
+        return static_cast<s32>(
+            std::lround((static_cast<s64>(x) - static_cast<s64>(content_bounds.left)) * scale));
+    };
+    const auto scale_y = [&](u32 y) {
+        return static_cast<s32>(
+            std::lround((static_cast<s64>(y) - static_cast<s64>(content_bounds.top)) * scale));
+    };
+    const auto transform = [&](const Common::Rectangle<u32>& screen) {
+        const auto clamp_x = [&](s32 x) {
+            return static_cast<u32>(std::clamp(x, 0, static_cast<s32>(eye_width)));
+        };
+        const auto clamp_y = [&](s32 y) {
+            return static_cast<u32>(std::clamp(y, 0, static_cast<s32>(layout.height)));
+        };
+        return Common::Rectangle<u32>{
+            clamp_x(centered_x + user_x_shift + scale_x(screen.left)),
+            clamp_y(centered_y + user_y_shift + scale_y(screen.top)),
+            clamp_x(centered_x + user_x_shift + scale_x(screen.right)),
+            clamp_y(centered_y + user_y_shift + scale_y(screen.bottom)),
+        };
+    };
+
     FramebufferLayout new_layout = layout;
-    new_layout.top_screen.left = top_screen_left + cardboard_max_x_shift;
-    new_layout.top_screen.top = top_screen_top + cardboard_max_y_shift + cardboard_user_y_shift;
-    new_layout.bottom_screen.left = bottom_screen_left + cardboard_max_x_shift;
-    new_layout.bottom_screen.top =
-        bottom_screen_top + cardboard_max_y_shift + cardboard_user_y_shift;
+    new_layout.top_screen = transform(layout.top_screen);
+    new_layout.bottom_screen = transform(layout.bottom_screen);
+    if (layout.additional_screen_enabled) {
+        new_layout.additional_screen = transform(layout.additional_screen);
+    }
 
-    // Set the X coordinates for the right eye and apply user X shift
-    new_layout.cardboard.top_screen_right_eye = new_layout.top_screen.left - cardboard_user_x_shift;
-    new_layout.top_screen.left += cardboard_user_x_shift;
-    new_layout.cardboard.bottom_screen_right_eye =
-        new_layout.bottom_screen.left - cardboard_user_x_shift;
-    new_layout.bottom_screen.left += cardboard_user_x_shift;
-    new_layout.cardboard.user_x_shift = cardboard_user_x_shift;
-
-    // Update right/bottom instead of passing new variables for width/height
-    new_layout.top_screen.right = new_layout.top_screen.left + top_screen_width;
-    new_layout.top_screen.bottom = new_layout.top_screen.top + top_screen_height;
-    new_layout.bottom_screen.right = new_layout.bottom_screen.left + bottom_screen_width;
-    new_layout.bottom_screen.bottom = new_layout.bottom_screen.top + bottom_screen_height;
-
+    // The renderer adds half the panel width to these coordinates for the right eye. Mirroring the
+    // alignment shift moves both images toward/away from the corresponding fixed Labo lenses.
+    const auto right_eye_x = [&](u32 left) {
+        return static_cast<u32>(
+            std::clamp(static_cast<s32>(left) - 2 * user_x_shift, 0, static_cast<s32>(eye_width)));
+    };
+    new_layout.cardboard.top_screen_right_eye = right_eye_x(new_layout.top_screen.left);
+    new_layout.cardboard.bottom_screen_right_eye = right_eye_x(new_layout.bottom_screen.left);
+    new_layout.cardboard.user_x_shift = user_x_shift;
     return new_layout;
 }
 

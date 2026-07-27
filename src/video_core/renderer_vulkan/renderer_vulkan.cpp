@@ -1312,8 +1312,7 @@ void RendererVulkan::DrawTopScreen(const Layout::FramebufferLayout& layout,
                          top_screen_height, orientation);
         draw_info.layer = 1;
         DrawSingleScreen(
-            rightside,
-            static_cast<float>(layout.cardboard.top_screen_right_eye + (layout.width / 2)),
+            rightside, top_screen_left - 2.0f * layout.cardboard.user_x_shift + (layout.width / 2),
             top_screen_top, top_screen_width, top_screen_height, orientation);
         break;
     }
@@ -1370,7 +1369,7 @@ void RendererVulkan::DrawBottomScreen(const Layout::FramebufferLayout& layout,
                          bottom_screen_height, orientation);
         draw_info.layer = 1;
         DrawSingleScreen(
-            2, static_cast<float>(layout.cardboard.bottom_screen_right_eye + (layout.width / 2)),
+            2, bottom_screen_left - 2.0f * layout.cardboard.user_x_shift + (layout.width / 2),
             bottom_screen_top, bottom_screen_width, bottom_screen_height, orientation);
         break;
     }
@@ -1458,54 +1457,57 @@ void RendererVulkan::DrawCursor(const Layout::FramebufferLayout& layout) {
     const float buf_w = static_cast<float>(layout.width);
     const float buf_h = static_cast<float>(layout.height);
 
-    // Convert from bottom-screen-local to layout-absolute, then to NDC
-    const float abs_x = layout.bottom_screen.left + cursor.projected_x;
     const float abs_y = layout.bottom_screen.top + cursor.projected_y;
-    const float cx = (abs_x / buf_w) * 2.0f - 1.0f;
     const float cy = (abs_y / buf_h) * 2.0f - 1.0f;
     const float ratio = static_cast<float>(layout.bottom_screen.GetHeight()) / 30.0f;
     const float rw = ratio / buf_w;
     const float rh = ratio / buf_h;
-
-    // Bottom screen bounds in NDC
-    const float bl = (layout.bottom_screen.left / buf_w) * 2.0f - 1.0f;
     const float bt = (layout.bottom_screen.top / buf_h) * 2.0f - 1.0f;
-    const float br = (layout.bottom_screen.right / buf_w) * 2.0f - 1.0f;
     const float bb = (layout.bottom_screen.bottom / buf_h) * 2.0f - 1.0f;
 
-    // Crosshair geometry clamped to bottom screen bounds
-    const float vl = std::fmax(cx - rw / 5.0f, bl);
-    const float vr = std::fmin(cx + rw / 5.0f, br);
-    const float vt = std::fmax(cy - rh, bt);
-    const float vb = std::fmin(cy + rh, bb);
+    // One crosshair is 12 vertices. Labo VR gets a matching crosshair in the
+    // right-eye copy so the pointer sits at a comfortable binocular depth.
+    std::array<float, 48> vertices{};
+    std::size_t vertex_data_size = 0;
+    const auto append_crosshair = [&](float horizontal_offset) {
+        const float abs_x = layout.bottom_screen.left + cursor.projected_x + horizontal_offset;
+        const float cx = (abs_x / buf_w) * 2.0f - 1.0f;
+        const float bl = ((layout.bottom_screen.left + horizontal_offset) / buf_w) * 2.0f - 1.0f;
+        const float br = ((layout.bottom_screen.right + horizontal_offset) / buf_w) * 2.0f - 1.0f;
 
-    const float hl = std::fmax(cx - rw, bl);
-    const float hr = std::fmin(cx + rw, br);
-    const float ht = std::fmax(cy - rh / 5.0f, bt);
-    const float hb = std::fmin(cy + rh / 5.0f, bb);
+        const float vl = std::fmax(cx - rw / 5.0f, bl);
+        const float vr = std::fmin(cx + rw / 5.0f, br);
+        const float vt = std::fmax(cy - rh, bt);
+        const float vb = std::fmin(cy + rh, bb);
+        const float hl = std::fmax(cx - rw, bl);
+        const float hr = std::fmin(cx + rw, br);
+        const float ht = std::fmax(cy - rh / 5.0f, bt);
+        const float hb = std::fmin(cy + rh / 5.0f, bb);
 
-    // 12 vertices = 4 triangles (2 for vertical bar, 2 for horizontal bar)
-    // clang-format off
-    const float vertices[] = {
-        // Vertical bar
-        vl, vt,  vr, vt,  vr, vb,
-        vl, vt,  vr, vb,  vl, vb,
-        // Horizontal bar
-        hl, ht,  hr, ht,  hr, hb,
-        hl, ht,  hr, hb,  hl, hb,
+        const std::array<float, 24> crosshair{
+            vl, vt, vr, vt, vr, vb, vl, vt, vr, vb, vl, vb,
+            hl, ht, hr, ht, hr, hb, hl, ht, hr, hb, hl, hb,
+        };
+        std::copy(crosshair.begin(), crosshair.end(), vertices.begin() + vertex_data_size);
+        vertex_data_size += crosshair.size();
     };
-    // clang-format on
 
-    const u64 size = sizeof(vertices);
+    append_crosshair(0.0f);
+    if (layout.render_3d_mode == Settings::StereoRenderOption::CardboardVR) {
+        append_crosshair(layout.width / 2.0f - 2.0f * layout.cardboard.user_x_shift);
+    }
+
+    const u64 size = vertex_data_size * sizeof(float);
     auto [data, offset, invalidate] = vertex_buffer.Map(size, 16);
-    std::memcpy(data, vertices, size);
+    std::memcpy(data, vertices.data(), size);
     vertex_buffer.Commit(size);
 
-    scheduler.Record([this, offset = offset, pipeline = cursor_pipeline](vk::CommandBuffer cmdbuf) {
+    scheduler.Record([this, offset = offset, vertex_count = static_cast<u32>(vertex_data_size / 2),
+                      pipeline = cursor_pipeline](vk::CommandBuffer cmdbuf) {
         cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
         cmdbuf.bindVertexBuffers(0, vertex_buffer.Handle(), {0});
         const u32 first_vertex = static_cast<u32>(offset) / (sizeof(float) * 2);
-        cmdbuf.draw(12, 1, first_vertex, 0);
+        cmdbuf.draw(vertex_count, 1, first_vertex, 0);
     });
 }
 
