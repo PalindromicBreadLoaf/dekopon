@@ -89,7 +89,7 @@ const char* PageName(Page page) {
 constexpr int kGyroStep = 10;
 
 // Percentage step and range for the emulated CPU clock.
-constexpr int kClockStep = 25;
+constexpr int kClockStep = 5;
 constexpr int kClockMin = 25;
 constexpr int kClockMax = 400;
 

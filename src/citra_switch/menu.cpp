@@ -688,7 +688,7 @@ void CycleSetting(MenuSettings& s, int idx, int dir) {
         s.disable_right_eye_render = dir > 0;
         break;
     case SettingRowCpuClock:
-        s.cpu_clock_percentage = std::clamp(s.cpu_clock_percentage + dir * 25, 25, 400);
+        s.cpu_clock_percentage = std::clamp(s.cpu_clock_percentage + dir * 5, 25, 400);
         break;
     case SettingRowNew3ds:
         s.is_new_3ds = dir > 0;
