@@ -216,6 +216,11 @@ void EmuThread(std::string path) {
     {
         const Common::Horizon::CpuBoostScope boost;
 
+        system.EjectCartridge();
+        if (!GetInsertedCartridge().empty()) {
+            system.InsertCartridge(GetInsertedCartridge());
+        }
+
         const Core::System::ResultStatus load_result = system.Load(*window, path);
         if (load_result != Core::System::ResultStatus::Success) {
             LOG_CRITICAL(Frontend, "Failed to load ROM '{}' (error {})", path,
@@ -568,6 +573,7 @@ void StopRom() {
     if (system.IsPoweredOn()) {
         system.Shutdown();
     }
+    system.EjectCartridge();
 }
 
 } // namespace SwitchFrontend

@@ -26,6 +26,10 @@ const SwitchPaths& GetPaths();
 // Persists `paths`. roms_dir and scan_recursive apply to the next scan.
 void SetPaths(const SwitchPaths& paths);
 
+// Cartridge image exposed to software launched from the emulated HOME Menu.
+const std::string& GetInsertedCartridge();
+void SetInsertedCartridge(const std::string& path);
+
 // The dekopon directory this session actually booted from.
 const std::string& GetActiveUserDir();
 

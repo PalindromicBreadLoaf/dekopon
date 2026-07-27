@@ -109,6 +109,7 @@ bool TryLoad(const std::string& path, const std::string& fallback_title, GameEnt
     entry.path = path;
     entry.title = fallback_title;
     entry.file_type = Loader::GetFileTypeString(loader->GetFileType(), loader->IsFileCompressed());
+    entry.insertable = loader->GetFileType() == Loader::FileType::CCI;
     loader->ReadProgramId(entry.program_id);
 
     std::vector<u8> smdh_buffer;

@@ -704,6 +704,12 @@ void DrawTile(Canvas& canvas, const GameEntry& game, int x, int y, bool selected
         g_font.Draw(canvas, badge_x + 7, CenterBaseline(badge_y, 20, 14), "LOCKED", 14, kColText);
         badge_x += lw + 6;
     }
+    if (game.insertable && GetInsertedCartridge() == game.path) {
+        const int lw = g_font.Measure("CART", 14) + 14;
+        canvas.FillRoundRect(badge_x, badge_y, lw, 20, 7, kColAccentDim);
+        g_font.Draw(canvas, badge_x + 7, CenterBaseline(badge_y, 20, 14), "CART", 14, kColText);
+        badge_x += lw + 6;
+    }
     if (game.installed) {
         const int lw = g_font.Measure("SD", 14) + 14;
         canvas.FillRoundRect(badge_x, badge_y, lw, 20, 7, kColAccentDim);
@@ -802,7 +808,7 @@ constexpr int kInstallRows = (kContentBottom - kInstallTop) / kInstallRowH;
 // Modal panel listing what is installed alongside one library entry.
 void DrawTitleDetails(Canvas& c, const GameEntry& game, const TitleDetails& details) {
     constexpr int w = 660;
-    constexpr int h = 356;
+    constexpr int h = 390;
     const int x = kContentX + (kContentW - w) / 2;
     const int y = kContentTop + (kContentBottom - kContentTop - h) / 2;
     c.FillRect(0, 0, kScreenW, kScreenH, MakeColor(0x10, 0x11, 0x13, 0xC0));
@@ -846,9 +852,21 @@ void DrawTitleDetails(Canvas& c, const GameEntry& game, const TitleDetails& deta
                               (details.dlc_contents == 1 ? " content" : " contents")
                         : std::string{"Not installed"},
         details.has_dlc ? kColAccent : kColTextDim);
+    const bool inserted = game.insertable && GetInsertedCartridge() == game.path;
+    if (game.insertable) {
+        row("Cartridge", inserted ? "Inserted" : "Not inserted",
+            inserted ? kColAccent : kColTextDim);
+    }
 
     ty += 4;
     g_font.Draw(c, x + 24, ty + 16, g_font.TruncateFront(game.path, 16, w - 48), 16, kColTextDim);
+
+    int hx = x + 24;
+    const int hy = y + h - 38;
+    if (game.insertable) {
+        hx += DrawHint(c, hx, hy, "X", inserted ? "Eject Cartridge" : "Insert Cartridge") + 22;
+    }
+    DrawHint(c, hx, hy, "B", "Close");
 }
 
 class Menu {
@@ -891,7 +909,10 @@ public:
             } else if (remap_open) {
                 HandleRemap(down, nav);
             } else if (details_open) {
-                // Any of the buttons that could have opened the panel also closes it.
+                const GameEntry& game = games[filtered[selected]];
+                if ((down & HidNpadButton_X) && game.insertable) {
+                    SetInsertedCartridge(GetInsertedCartridge() == game.path ? "" : game.path);
+                }
                 if (down & (HidNpadButton_A | HidNpadButton_B | HidNpadButton_Plus)) {
                     details_open = false;
                 }
