@@ -6,6 +6,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <type_traits>
 #include <INIReader.h>
 #include "common/file_util.h"
 #include "common/logging/backend.h"
@@ -55,6 +56,108 @@ void WriteUserDirPointer(const std::string& user_dir) {
 
 SwitchFrontend::SwitchPaths s_paths;
 std::string s_active_user_dir;
+
+// Every Settings::values entry config.ini round-trips, in file order. Reading and writing share
+// this list so the two cannot drift apart.
+template <typename Visitor>
+void VisitPersistedSettings(Visitor&& visit) {
+    auto& v = Settings::values;
+
+    visit("Core", v.use_cpu_jit);
+    visit("Core", v.cpu_clock_percentage);
+    visit("Core", v.is_new_3ds);
+
+    visit("Renderer", v.graphics_api);
+    visit("Renderer", v.use_gles);
+    visit("Renderer", v.resolution_factor);
+    visit("Renderer", v.use_integer_scaling);
+    visit("Renderer", v.frame_limit);
+    visit("Renderer", v.use_vsync);
+    visit("Renderer", v.use_display_refresh_rate_detection);
+    visit("Renderer", v.async_gpu_emulation);
+    visit("Renderer", v.strict_gpu_sync);
+    visit("Renderer", v.async_presentation);
+    visit("Renderer", v.async_shader_compilation);
+    visit("Renderer", v.use_disk_shader_cache);
+    visit("Renderer", v.use_hw_shader);
+    visit("Renderer", v.shaders_accurate_mul);
+    visit("Renderer", v.use_shader_jit);
+    visit("Renderer", v.spirv_shader_gen);
+    visit("Renderer", v.disable_spirv_optimizer);
+    visit("Renderer", v.texture_filter);
+    visit("Renderer", v.texture_sampling);
+    visit("Renderer", v.filter_mode);
+    visit("Renderer", v.simulate_3ds_gpu_timings);
+    visit("Renderer", v.delay_game_render_thread_us);
+    visit("Renderer", v.show_fps);
+    visit("Renderer", v.show_shader_compile_notice);
+    visit("Renderer", v.render_3d);
+    visit("Renderer", v.factor_3d);
+    visit("Renderer", v.swap_eyes_3d);
+    visit("Renderer", v.mono_render_option);
+    visit("Renderer", v.disable_right_eye_render);
+
+    visit("Layout", v.screen_gap);
+    visit("Layout", v.large_screen_proportion);
+    visit("Layout", v.overlay_screen_position);
+    visit("Layout", v.overlay_screen_size);
+    visit("Layout", v.overlay_screen_opacity);
+    visit("Layout", v.screen_top_leftright_padding);
+    visit("Layout", v.screen_top_topbottom_padding);
+    visit("Layout", v.screen_bottom_leftright_padding);
+    visit("Layout", v.screen_bottom_topbottom_padding);
+    visit("Layout", v.bg_red);
+    visit("Layout", v.bg_green);
+    visit("Layout", v.bg_blue);
+
+    visit("Audio", v.audio_emulation);
+    visit("Audio", v.volume);
+    visit("Audio", v.enable_audio_stretching);
+    visit("Audio", v.enable_realtime_audio);
+    visit("Audio", v.simulate_headphones_plugged);
+
+    visit("Utility", v.custom_textures);
+    visit("Utility", v.preload_textures);
+    visit("Utility", v.async_custom_loading);
+    visit("Utility", v.dump_textures);
+
+    visit("System", v.region_value);
+    visit("System", v.lle_applets);
+    visit("System", v.enable_required_online_lle_modules);
+    visit("System", v.apply_region_free_patch);
+    visit("System", v.init_clock);
+    visit("System", v.init_time_offset);
+    visit("System", v.steps_per_hour);
+    visit("System", v.plugin_loader_enabled);
+    visit("System", v.allow_plugin_loader);
+
+    visit("Data Storage", v.use_virtual_sd);
+    visit("Data Storage", v.compress_cia_installs);
+    visit("Data Storage", v.async_fs_operations);
+
+    visit("Debugging", v.deterministic_async_operations);
+    visit("Debugging", v.delay_start_for_lle_modules);
+    visit("Debugging", v.toggle_unique_data_console_type);
+    visit("Debugging", v.break_on_unmapped_memory_access);
+    visit("Debugging", v.renderer_debug);
+    visit("Debugging", v.dump_command_buffers);
+    visit("Debugging", v.instant_debug_log);
+
+    visit("Miscellaneous", v.log_filter);
+}
+
+template <typename Type, bool ranged>
+void WriteSetting(std::ostringstream& ss, const Settings::Setting<Type, ranged>& setting) {
+    ss << setting.GetLabel() << " = ";
+    if constexpr (std::is_same_v<Type, bool>) {
+        ss << (setting.GetValue() ? "true" : "false");
+    } else if constexpr (std::is_enum_v<Type>) {
+        ss << static_cast<int>(setting.GetValue());
+    } else {
+        ss << setting.GetValue();
+    }
+    ss << '\n';
+}
 
 // Reads/Writes the SD-card config file
 class Config {
@@ -124,48 +227,17 @@ private:
     }
 
     void ReadValues() {
-        // Core
-        ReadSetting("Core", Settings::values.use_cpu_jit);
-        ReadSetting("Core", Settings::values.cpu_clock_percentage);
+        VisitPersistedSettings(
+            [this](const char* group, auto& setting) { ReadSetting(group, setting); });
+
+        // New 3DS mode doubles the emulated core count and the JIT code caches that go with it.
+        // This is just a performance loss if the game doesn't use these cores.
         Settings::values.is_new_3ds =
             config->GetBoolean("Core", Settings::values.is_new_3ds.GetLabel(), false);
 
-        // Renderer
-        ReadSetting("Renderer", Settings::values.graphics_api);
-        ReadSetting("Renderer", Settings::values.use_gles);
-        ReadSetting("Renderer", Settings::values.resolution_factor);
-        ReadSetting("Renderer", Settings::values.use_vsync);
-        ReadSetting("Renderer", Settings::values.async_gpu_emulation);
-        ReadSetting("Renderer", Settings::values.strict_gpu_sync);
-        ReadSetting("Renderer", Settings::values.async_shader_compilation);
-        ReadSetting("Renderer", Settings::values.use_disk_shader_cache);
-        ReadSetting("Renderer", Settings::values.use_hw_shader);
-        ReadSetting("Renderer", Settings::values.texture_filter);
-        ReadSetting("Renderer", Settings::values.filter_mode);
-        ReadSetting("Renderer", Settings::values.use_integer_scaling);
-        ReadSetting("Renderer", Settings::values.show_fps);
-        ReadSetting("Renderer", Settings::values.show_shader_compile_notice);
-        ReadSetting("Renderer", Settings::values.use_shader_jit);
-        ReadSetting("Renderer", Settings::values.disable_right_eye_render);
-
-        // Layout
-        SwitchFrontend::SetFullscreenStretchEnabled(
-            config->GetBoolean("Layout", "stretch_fullscreen", false));
-        ReadSetting("Layout", Settings::values.screen_gap);
-        ReadSetting("Layout", Settings::values.overlay_screen_position);
-        ReadSetting("Layout", Settings::values.overlay_screen_size);
-        ReadSetting("Layout", Settings::values.overlay_screen_opacity);
-
-        // Utility
-        ReadSetting("Utility", Settings::values.custom_textures);
-        ReadSetting("Utility", Settings::values.preload_textures);
-        ReadSetting("Utility", Settings::values.dump_textures);
-
-        // System
-        ReadSetting("System", Settings::values.region_value);
-
-        // Miscellaneous
-        ReadSetting("Miscellaneous", Settings::values.log_filter);
+        SwitchFrontend::SetFullscreenStretchEnabled(config->GetBoolean(
+            "Switch", "stretch_fullscreen",
+            config->GetBoolean("Layout", "stretch_fullscreen", false)));
 
         // The core expects every known service module to have an explicit setting and crashes if not.
         for (const auto& service_module : Service::service_module_map) {
@@ -210,60 +282,21 @@ private:
 
     std::string BuildINI() const {
         std::ostringstream ss;
-        const auto& v = Settings::values;
 
-        ss << "[Core]\n";
-        ss << "use_cpu_jit = " << (v.use_cpu_jit.GetValue() ? "true" : "false") << '\n';
-        ss << "cpu_clock_percentage = " << v.cpu_clock_percentage.GetValue() << '\n';
-        ss << "is_new_3ds = " << (v.is_new_3ds.GetValue() ? "true" : "false") << "\n\n";
+        std::string open_group;
+        VisitPersistedSettings([&](const char* group, const auto& setting) {
+            if (open_group != group) {
+                open_group = group;
+                ss << (ss.tellp() == 0 ? "" : "\n") << '[' << group << "]\n";
+            }
+            WriteSetting(ss, setting);
+        });
 
-        ss << "[Renderer]\n";
-        ss << "graphics_api = " << static_cast<int>(v.graphics_api.GetValue()) << '\n';
-        ss << "use_gles = " << (v.use_gles.GetValue() ? "true" : "false") << '\n';
-        ss << "resolution_factor = " << v.resolution_factor.GetValue() << '\n';
-        ss << "use_vsync = " << (v.use_vsync.GetValue() ? "true" : "false") << '\n';
-        ss << "async_gpu_emulation = " << (v.async_gpu_emulation.GetValue() ? "true" : "false")
-           << '\n';
-        ss << "strict_gpu_sync = " << (v.strict_gpu_sync.GetValue() ? "true" : "false") << '\n';
-        ss << "async_shader_compilation = "
-           << (v.async_shader_compilation.GetValue() ? "true" : "false") << '\n';
-        ss << "use_disk_shader_cache = " << (v.use_disk_shader_cache.GetValue() ? "true" : "false")
-           << '\n';
-        ss << "use_hw_shader = " << (v.use_hw_shader.GetValue() ? "true" : "false") << '\n';
-        ss << "texture_filter = " << static_cast<int>(v.texture_filter.GetValue()) << '\n';
-        ss << "filter_mode = " << (v.filter_mode.GetValue() ? "true" : "false") << '\n';
-        ss << "use_integer_scaling = " << (v.use_integer_scaling.GetValue() ? "true" : "false")
-           << '\n';
-        ss << "show_fps = " << (v.show_fps.GetValue() ? "true" : "false") << '\n';
-        ss << "show_shader_compile_notice = "
-           << (v.show_shader_compile_notice.GetValue() ? "true" : "false") << '\n';
-        ss << "use_shader_jit = " << (v.use_shader_jit.GetValue() ? "true" : "false") << '\n';
-        ss << "disable_right_eye_render = "
-           << (v.disable_right_eye_render.GetValue() ? "true" : "false") << "\n\n";
-
-        ss << "[Layout]\n";
-        ss << "stretch_fullscreen = "
-           << (SwitchFrontend::IsFullscreenStretchEnabled() ? "true" : "false") << '\n';
-        ss << "screen_gap = " << v.screen_gap.GetValue() << '\n';
-        ss << "overlay_screen_position = "
-           << static_cast<int>(v.overlay_screen_position.GetValue()) << '\n';
-        ss << "overlay_screen_size = " << v.overlay_screen_size.GetValue() << '\n';
-        ss << "overlay_screen_opacity = " << v.overlay_screen_opacity.GetValue() << "\n\n";
-
-        ss << "[Utility]\n";
-        ss << "custom_textures = " << (v.custom_textures.GetValue() ? "true" : "false") << '\n';
-        ss << "preload_textures = " << (v.preload_textures.GetValue() ? "true" : "false") << '\n';
-        ss << "dump_textures = " << (v.dump_textures.GetValue() ? "true" : "false") << "\n\n";
-
-        ss << "[System]\n";
-        ss << "region_value = " << v.region_value.GetValue() << "\n\n";
-
-        ss << "[Miscellaneous]\n";
-        ss << "log_filter = " << v.log_filter.GetValue() << "\n\n";
-
-        ss << "[Switch]\n";
+        ss << "\n[Switch]\n";
         ss << "roms_dir = " << s_paths.roms_dir << '\n';
         ss << "scan_recursive = " << (s_paths.scan_recursive ? "true" : "false") << '\n';
+        ss << "stretch_fullscreen = "
+           << (SwitchFrontend::IsFullscreenStretchEnabled() ? "true" : "false") << '\n';
         ss << "pointer_source = " << static_cast<int>(SwitchFrontend::GetPointerSource()) << '\n';
         ss << "gyro_sensitivity_x = " << SwitchFrontend::GetGyroSensitivityX() << '\n';
         ss << "gyro_sensitivity_y = " << SwitchFrontend::GetGyroSensitivityY() << '\n';

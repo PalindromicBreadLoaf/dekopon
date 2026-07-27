@@ -407,6 +407,12 @@ int GetScreenGap() {
     return Settings::values.screen_gap.GetValue();
 }
 
+void RequestLayoutUpdate() {
+    if (Core::System::GetInstance().IsPoweredOn()) {
+        s_layout_update_pending.store(true, std::memory_order_release);
+    }
+}
+
 void CycleScreenLayout() {
     auto& system = Core::System::GetInstance();
     if (!system.IsPoweredOn()) {

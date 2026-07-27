@@ -78,37 +78,6 @@ struct DirEntry {
     std::string path; // Absolute SD path with a trailing '/'.
 };
 
-// The subset of settings the on-console menu can edit.
-struct MenuSettings {
-    int resolution_factor{};      // 0 = auto (window), 1 = native, 2... = upscale factor.
-    bool use_vsync{};
-    bool async_gpu_emulation{};
-    bool strict_gpu_sync{};
-    bool async_shader_compilation{};
-    bool use_disk_shader_cache{};
-    bool use_hw_shader{};         // Off falls the whole pipeline back to the CPU shader engine.
-    int texture_filter{};         // Upscaling filter, 0 = None .. 5 = MMPX.
-    bool filter_mode{};           // Linear (on) or nearest-neighbour (off) screen sampling.
-    bool use_integer_scaling{};   // Scale the screen by whole-number factors only.
-    bool stretch_fullscreen{};    // Fill the display in either single-screen layout.
-    bool show_fps{};              // On-screen framerate counter.
-    bool show_shader_compile_notice{};
-    bool disable_right_eye_render{};
-    bool preload_textures{};      // Load the whole custom texture pack up front.
-    bool dump_textures{};         // Write the game's textures out to disk.
-    int cpu_clock_percentage{};   // 5..400.
-    bool is_new_3ds{};
-    bool use_cpu_jit{};
-    int region_value{};           // -1 = auto, 0..6 per SMDH region order.
-    int language{};               // 3DS system language, 0..11.
-    int graphics_api{};           // Active graphics API backend.
-    int pointer_source{};         // Touch pointer driver.
-    int gyro_sensitivity_x{};     // Gyro pointer horizontal sensitivity, percent of the default.
-    int gyro_sensitivity_y{};     // Gyro pointer vertical sensitivity, percent of the default.
-    std::uint32_t layout_cycle_mask{}; // Presets R3 cycles through (bit i = preset i).
-    bool pause_in_quick_menu{};   // Freeze the game while the in-game quick menu is open.
-};
-
 // Scans the configured ROM directory and the installed SD titles, sorted by title.
 std::vector<GameEntry> ScanGames();
 
@@ -146,11 +115,5 @@ std::string ParentDirectory(const std::string& directory);
 
 // True if `directory` exists or could be created.
 bool EnsureDirectory(const std::string& directory);
-
-// Snapshots the editable settings from Settings::values.
-MenuSettings GetMenuSettings();
-
-// Applies edited settings to Settings::values and saves config.ini.
-void SetMenuSettings(const MenuSettings& settings);
 
 } // namespace SwitchFrontend

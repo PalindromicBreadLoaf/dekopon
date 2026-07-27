@@ -9,13 +9,11 @@
 #include <vector>
 
 #include "citra_switch/config.h"
-#include "citra_switch/input.h"
 #include "citra_switch/overlay_menu.h"
-#include "common/settings.h"
+#include "citra_switch/settings_menu.h"
 #include "core/cheats/cheat_base.h"
 #include "core/cheats/cheats.h"
 #include "core/core.h"
-#include "core/core_timing.h"
 #include "core/loader/loader.h"
 #include "core/savestate.h"
 #include "video_core/overlay.h"
@@ -24,26 +22,10 @@ namespace SwitchFrontend {
 
 namespace {
 
-// The kind of row. Cheat rows are appended once per loaded cheat on the current page, so a row
-// also carries the cheat's index into the engine's list.
+// The kind of row. Setting rows index into the current page's row list, cheat rows into the
+// engine's cheat list, and save state rows into the slots.
 enum class Item {
-    ScreenLayout,
-    SwapScreens,
-    ScreenGap,
-    OverlayPosition,
-    OverlaySize,
-    OverlayOpacity,
-    StretchFullscreen,
-    FpsCounter,
-    ShaderCompileNotice,
-    CustomTextures,
-    DisableRightEyeRender,
-    PointerSource,
-    PointerMode,
-    GyroSensitivityX,
-    GyroSensitivityY,
-    CpuClock,
-    PauseInMenu,
+    Setting,
     Cheat,
     CheatsEmpty,
     SaveStateSlot,
@@ -53,45 +35,43 @@ enum class Item {
 
 struct Row {
     Item item;
-    int cheat_index = -1;
-    int slot = -1;
+    int index = -1;
 };
 
-// The overlay is split into pages with L/R used to cycle between them.
+// The overlay is split into pages with L/R used to cycle between them. Everything up to States
+// is a settings page and maps onto the QuickPage of the same ordinal.
 enum class Page {
     Display,
+    Graphics,
+    Stereo,
+    Audio,
     Input,
     System,
     States,
     Cheats,
 };
 
-constexpr std::array<Page, 5> kPages = {Page::Display, Page::Input, Page::System, Page::States,
-                                        Page::Cheats};
+constexpr std::array<Page, NumQuickPages + 2> kPages = {Page::Display, Page::Graphics, Page::Stereo,
+                                                        Page::Audio,   Page::Input,    Page::System,
+                                                        Page::States,  Page::Cheats};
+
+static_assert(static_cast<int>(Page::States) == NumQuickPages,
+              "the settings pages have to lead, in QuickPage order");
+
+bool IsSettingsPage(Page page) {
+    return static_cast<int>(page) < NumQuickPages;
+}
 
 const char* PageName(Page page) {
     switch (page) {
-    case Page::Display:
-        return "Display";
-    case Page::Input:
-        return "Input";
-    case Page::System:
-        return "System";
     case Page::States:
         return "States";
     case Page::Cheats:
         return "Cheats";
+    default:
+        return QuickPageName(static_cast<QuickPage>(page));
     }
-    return "";
 }
-
-// Percentage step for the gyro sensitivity rows.
-constexpr int kGyroStep = 10;
-
-// Percentage step and range for the emulated CPU clock.
-constexpr int kClockStep = 5;
-constexpr int kClockMin = 25;
-constexpr int kClockMax = 800;
 
 // Cheats past this many spill onto further sub-pages.
 constexpr int kCheatsPerPage = 8;
@@ -106,6 +86,7 @@ int s_selected = 0;
 int s_cheat_page = 0;
 int s_state_page = 0;
 std::vector<Row> s_rows;
+std::vector<SettingsRow> s_settings;
 bool s_cheats_dirty = false;
 
 // Slot status strings.
@@ -192,45 +173,26 @@ void PersistCheats() {
 // Rebuilds the visible rows for the active page and keeps the cursor in range.
 void RebuildRows() {
     s_rows.clear();
-    switch (CurrentPage()) {
-    case Page::Display:
-        s_rows.push_back({Item::ScreenLayout});
-        s_rows.push_back({Item::SwapScreens});
-        s_rows.push_back({Item::ScreenGap});
-        if (IsOverlayScreenLayout()) {
-            s_rows.push_back({Item::OverlayPosition});
-            s_rows.push_back({Item::OverlaySize});
-            s_rows.push_back({Item::OverlayOpacity});
+    s_settings.clear();
+    const Page page = CurrentPage();
+    if (IsSettingsPage(page)) {
+        s_settings = BuildQuickPage(static_cast<QuickPage>(page));
+        for (int i = 0; i < static_cast<int>(s_settings.size()); ++i) {
+            s_rows.push_back({Item::Setting, i});
         }
-        s_rows.push_back({Item::StretchFullscreen});
-        s_rows.push_back({Item::FpsCounter});
-        s_rows.push_back({Item::ShaderCompileNotice});
-        s_rows.push_back({Item::CustomTextures});
-        s_rows.push_back({Item::DisableRightEyeRender});
-        break;
-    case Page::Input:
-        s_rows.push_back({Item::PointerSource});
-        s_rows.push_back({Item::PointerMode});
-        s_rows.push_back({Item::GyroSensitivityX});
-        s_rows.push_back({Item::GyroSensitivityY});
-        break;
-    case Page::System:
-        s_rows.push_back({Item::CpuClock});
-        s_rows.push_back({Item::PauseInMenu});
-        s_rows.push_back({Item::Resume});
-        s_rows.push_back({Item::ExitGame});
-        break;
-    case Page::States: {
+        if (page == Page::System) {
+            s_rows.push_back({Item::Resume});
+            s_rows.push_back({Item::ExitGame});
+        }
+    } else if (page == Page::States) {
         s_state_page = std::clamp(s_state_page, 0, StatePageCount() - 1);
         const int first = s_state_page * kSlotsPerPage;
         const int last =
             std::min(static_cast<int>(Core::SaveStateSlotCount), first + kSlotsPerPage);
         for (int slot = first; slot < last; ++slot) {
-            s_rows.push_back({Item::SaveStateSlot, -1, slot});
+            s_rows.push_back({Item::SaveStateSlot, slot});
         }
-        break;
-    }
-    case Page::Cheats: {
+    } else {
         const int count = CheatCount();
         s_cheat_page = std::clamp(s_cheat_page, 0, CheatPageCount() - 1);
         const int first = s_cheat_page * kCheatsPerPage;
@@ -241,71 +203,31 @@ void RebuildRows() {
         if (s_rows.empty()) {
             s_rows.push_back({Item::CheatsEmpty});
         }
-        break;
-    }
     }
     s_selected = std::clamp(s_selected, 0, static_cast<int>(s_rows.size()) - 1);
 }
 
-// The running timers keep their own copy of the clock scale, so a change has to be pushed into
-// core timing to take effect without a reboot.
-void SetCpuClock(int percent) {
-    percent = std::clamp(percent, kClockMin, kClockMax);
-    Settings::values.cpu_clock_percentage = percent;
-    auto& system = Core::System::GetInstance();
-    if (system.IsPoweredOn()) {
-        system.CoreTiming().UpdateClockSpeed(static_cast<u32>(percent));
-    }
-}
-
+// Rows that only respond to A, and as such carry no value.
 bool IsAction(const Row& row) {
-    return row.item == Item::SwapScreens || row.item == Item::Resume ||
-           row.item == Item::ExitGame || row.item == Item::CheatsEmpty ||
-           row.item == Item::SaveStateSlot;
+    switch (row.item) {
+    case Item::Setting:
+    case Item::Cheat:
+        return false;
+    default:
+        return true;
+    }
 }
 
 std::string Label(const Row& row) {
     switch (row.item) {
-    case Item::ScreenLayout:
-        return "Screen Layout";
-    case Item::SwapScreens:
-        return "Swap Screens";
-    case Item::ScreenGap:
-        return "Screen Gap";
-    case Item::OverlayPosition:
-        return "Overlay Position";
-    case Item::OverlaySize:
-        return "Overlay Size";
-    case Item::OverlayOpacity:
-        return "Overlay Opacity";
-    case Item::StretchFullscreen:
-        return "Stretch Fullscreen";
-    case Item::GyroSensitivityX:
-        return "Gyro Sens. X";
-    case Item::GyroSensitivityY:
-        return "Gyro Sens. Y";
-    case Item::PointerSource:
-        return "Touch Pointer";
-    case Item::PointerMode:
-        return "Pointer Mode";
-    case Item::FpsCounter:
-        return "FPS Counter";
-    case Item::ShaderCompileNotice:
-        return "Shader Compile Notice";
-    case Item::CustomTextures:
-        return "Custom Textures";
-    case Item::DisableRightEyeRender:
-        return "No Right Eye";
-    case Item::CpuClock:
-        return "CPU Clock";
-    case Item::PauseInMenu:
-        return "Pause In Menu";
+    case Item::Setting:
+        return s_settings[static_cast<std::size_t>(row.index)].label;
     case Item::Cheat:
-        return CheatName(row.cheat_index);
+        return CheatName(row.index);
     case Item::CheatsEmpty:
         return "No cheats loaded";
     case Item::SaveStateSlot:
-        return SaveStateSlotName(static_cast<unsigned int>(row.slot));
+        return SaveStateSlotName(static_cast<unsigned int>(row.index));
     case Item::Resume:
         return "Resume Game";
     case Item::ExitGame:
@@ -316,42 +238,12 @@ std::string Label(const Row& row) {
 
 std::string Value(const Row& row) {
     switch (row.item) {
-    case Item::ScreenLayout:
-        return CurrentScreenLayoutName();
-    case Item::ScreenGap:
-        return std::to_string(GetScreenGap()) + " px";
-    case Item::OverlayPosition:
-        return OverlayScreenPositionName();
-    case Item::OverlaySize:
-        return std::to_string(GetOverlayScreenSize()) + "%";
-    case Item::OverlayOpacity:
-        return std::to_string(GetOverlayScreenOpacity()) + "%";
-    case Item::StretchFullscreen:
-        return IsFullscreenStretchEnabled() ? "On" : "Off";
-    case Item::GyroSensitivityX:
-        return std::to_string(GetGyroSensitivityX()) + "%";
-    case Item::GyroSensitivityY:
-        return std::to_string(GetGyroSensitivityY()) + "%";
-    case Item::PointerSource:
-        return PointerSourceName(GetPointerSource());
-    case Item::PointerMode:
-        return IsPointerModeActive() ? "On" : "Off";
-    case Item::FpsCounter:
-        return Settings::values.show_fps.GetValue() ? "On" : "Off";
-    case Item::ShaderCompileNotice:
-        return Settings::values.show_shader_compile_notice.GetValue() ? "On" : "Off";
-    case Item::CustomTextures:
-        return Settings::values.custom_textures.GetValue() ? "On" : "Off";
-    case Item::DisableRightEyeRender:
-        return Settings::values.disable_right_eye_render.GetValue() ? "On" : "Off";
-    case Item::CpuClock:
-        return std::to_string(Settings::values.cpu_clock_percentage.GetValue()) + "%";
-    case Item::PauseInMenu:
-        return IsPauseInQuickMenu() ? "On" : "Off";
+    case Item::Setting:
+        return s_settings[static_cast<std::size_t>(row.index)].value();
     case Item::Cheat:
-        return CheatEnabled(row.cheat_index) ? "On" : "Off";
+        return CheatEnabled(row.index) ? "On" : "Off";
     case Item::SaveStateSlot: {
-        const std::string& status = s_slot_status[static_cast<std::size_t>(row.slot)];
+        const std::string& status = s_slot_status[static_cast<std::size_t>(row.index)];
         return status.empty() ? "Empty" : status;
     }
     default:
@@ -362,103 +254,25 @@ std::string Value(const Row& row) {
 // Left/right on a value row. `dir` is -1 or +1.
 void Adjust(const Row& row, int dir) {
     switch (row.item) {
-    case Item::ScreenLayout:
-        StepScreenLayout(dir);
-        break;
-    case Item::ScreenGap:
-        StepScreenGap(dir);
-        break;
-    case Item::OverlayPosition:
-        StepOverlayScreenPosition(dir);
-        break;
-    case Item::OverlaySize:
-        StepOverlayScreenSize(dir);
-        break;
-    case Item::OverlayOpacity:
-        StepOverlayScreenOpacity(dir);
-        break;
-    case Item::StretchFullscreen:
-        SetFullscreenStretchEnabled(dir > 0);
-        break;
-    case Item::GyroSensitivityX:
-        SetGyroSensitivity(GetGyroSensitivityX() + dir * kGyroStep, GetGyroSensitivityY());
-        break;
-    case Item::GyroSensitivityY:
-        SetGyroSensitivity(GetGyroSensitivityX(), GetGyroSensitivityY() + dir * kGyroStep);
-        break;
-    case Item::PointerSource:
-        SetPointerSource(static_cast<PointerSource>(std::clamp(
-            static_cast<int>(GetPointerSource()) + dir, 0, NumPointerSources - 1)));
-        break;
-    case Item::PointerMode:
-        SetPointerMode(dir > 0);
-        break;
-    case Item::FpsCounter:
-        Settings::values.show_fps = dir > 0;
-        break;
-    case Item::ShaderCompileNotice:
-        Settings::values.show_shader_compile_notice = dir > 0;
-        break;
-    case Item::CustomTextures:
-        Settings::values.custom_textures = dir > 0;
-        break;
-    case Item::DisableRightEyeRender:
-        Settings::values.disable_right_eye_render = dir > 0;
-        break;
-    case Item::CpuClock:
-        SetCpuClock(Settings::values.cpu_clock_percentage.GetValue() + dir * kClockStep);
-        break;
-    case Item::PauseInMenu:
-        SetPauseInQuickMenu(dir > 0);
+    case Item::Setting:
+        s_settings[static_cast<std::size_t>(row.index)].step(dir);
         break;
     case Item::Cheat:
-        ToggleCheat(row.cheat_index);
+        ToggleCheat(row.index);
         break;
     default:
         break;
     }
 }
 
-// Pressing 'a' on a row advances the list by one.
+// Pressing 'a' on a row advances the list by one, or flips it when it is an On/Off row.
 void Activate(const Row& row) {
-    switch (row.item) {
-    case Item::SwapScreens:
-        ToggleSwapScreens();
-        break;
-    case Item::PointerSource:
-        SetPointerSource(static_cast<PointerSource>(
-            (static_cast<int>(GetPointerSource()) + 1) % NumPointerSources));
-        break;
-    case Item::PointerMode:
-        TogglePointerMode();
-        break;
-    case Item::FpsCounter:
-        Settings::values.show_fps = !Settings::values.show_fps.GetValue();
-        break;
-    case Item::ShaderCompileNotice:
-        Settings::values.show_shader_compile_notice =
-            !Settings::values.show_shader_compile_notice.GetValue();
-        break;
-    case Item::CustomTextures:
-        Settings::values.custom_textures = !Settings::values.custom_textures.GetValue();
-        break;
-    case Item::DisableRightEyeRender:
-        Settings::values.disable_right_eye_render =
-            !Settings::values.disable_right_eye_render.GetValue();
-        break;
-    case Item::StretchFullscreen:
-        SetFullscreenStretchEnabled(!IsFullscreenStretchEnabled());
-        break;
-    case Item::PauseInMenu:
-        SetPauseInQuickMenu(!IsPauseInQuickMenu());
-        break;
-    case Item::Cheat:
-        ToggleCheat(row.cheat_index);
-        break;
-    default:
+    if (row.item != Item::Setting) {
         Adjust(row, 1);
-        break;
+        return;
     }
+    const SettingsRow& setting = s_settings[static_cast<std::size_t>(row.index)];
+    setting.step(setting.boolean && setting.boolean() ? -1 : 1);
 }
 
 void Repaint() {
@@ -488,7 +302,9 @@ void Repaint() {
     }
     state.items.reserve(s_rows.size());
     for (const Row& row : s_rows) {
-        state.items.push_back({Label(row), Value(row), IsAction(row)});
+        std::string value = Value(row);
+        const bool no_value = value.empty();
+        state.items.push_back({Label(row), std::move(value), no_value});
     }
     VideoCore::SetOverlayMenuState(state);
 }
@@ -611,7 +427,7 @@ QuickMenuAction UpdateQuickMenu(const QuickMenuNav& nav) {
     // A loads, X saves, Y deletes. Save and load are queued for the emulation thread, which only
     // reaches them once the menu lets the guest run again, so close on the way out.
     if (row.item == Item::SaveStateSlot && (nav.confirm || nav.alt || nav.alt2)) {
-        const auto slot = static_cast<unsigned int>(row.slot);
+        const auto slot = static_cast<unsigned int>(row.index);
         const bool occupied = !s_slot_status[slot].empty();
         if (nav.alt) {
             if (RequestSaveState(slot)) {

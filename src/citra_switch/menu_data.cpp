@@ -11,18 +11,13 @@
 #include <fmt/format.h>
 
 #include "citra_switch/config.h"
-#include "citra_switch/input.h"
 #include "citra_switch/menu_data.h"
-#include "citra_switch/overlay_menu.h"
 #include "common/file_util.h"
 #include "common/string_util.h"
-#include "common/settings.h"
 #include "common/zstd_compression.h"
-#include "core/core.h"
 #include "core/file_sys/cia_container.h"
 #include "core/file_sys/title_metadata.h"
 #include "core/hle/service/am/am.h"
-#include "core/hle/service/cfg/cfg.h"
 #include "core/hle/service/fs/archive.h"
 #include "core/loader/loader.h"
 #include "core/loader/smdh.h"
@@ -460,80 +455,6 @@ std::string ParentDirectory(const std::string& directory) {
 
 bool EnsureDirectory(const std::string& directory) {
     return FileUtil::CreateFullPath(directory) && FileUtil::IsDirectory(directory);
-}
-
-MenuSettings GetMenuSettings() {
-    const auto& v = Settings::values;
-    return MenuSettings{
-        .resolution_factor = static_cast<int>(v.resolution_factor.GetValue()),
-        .use_vsync = v.use_vsync.GetValue(),
-        .async_gpu_emulation = v.async_gpu_emulation.GetValue(),
-        .strict_gpu_sync = v.strict_gpu_sync.GetValue(),
-        .async_shader_compilation = v.async_shader_compilation.GetValue(),
-        .use_disk_shader_cache = v.use_disk_shader_cache.GetValue(),
-        .use_hw_shader = v.use_hw_shader.GetValue(),
-        .texture_filter = static_cast<int>(v.texture_filter.GetValue()),
-        .filter_mode = v.filter_mode.GetValue(),
-        .use_integer_scaling = v.use_integer_scaling.GetValue(),
-        .stretch_fullscreen = IsFullscreenStretchEnabled(),
-        .show_fps = v.show_fps.GetValue(),
-        .show_shader_compile_notice = v.show_shader_compile_notice.GetValue(),
-        .disable_right_eye_render = v.disable_right_eye_render.GetValue(),
-        .preload_textures = v.preload_textures.GetValue(),
-        .dump_textures = v.dump_textures.GetValue(),
-        .cpu_clock_percentage = static_cast<int>(v.cpu_clock_percentage.GetValue()),
-        .is_new_3ds = v.is_new_3ds.GetValue(),
-        .use_cpu_jit = v.use_cpu_jit.GetValue(),
-        .region_value = static_cast<int>(v.region_value.GetValue()),
-        .language = static_cast<int>(
-            Service::CFG::GetModule(Core::System::GetInstance())->GetSystemLanguage()),
-        .graphics_api = static_cast<int>(Settings::GetWorkingGraphicsAPI()),
-        .pointer_source = static_cast<int>(GetPointerSource()),
-        .gyro_sensitivity_x = GetGyroSensitivityX(),
-        .gyro_sensitivity_y = GetGyroSensitivityY(),
-        .layout_cycle_mask = GetLayoutCycleMask(),
-        .pause_in_quick_menu = IsPauseInQuickMenu(),
-    };
-}
-
-void SetMenuSettings(const MenuSettings& s) {
-    auto& v = Settings::values;
-    v.resolution_factor = static_cast<u32>(std::clamp(s.resolution_factor, 0, 10));
-    v.use_vsync = s.use_vsync;
-    v.async_gpu_emulation = s.async_gpu_emulation;
-    v.strict_gpu_sync = s.strict_gpu_sync;
-    v.async_shader_compilation = s.async_shader_compilation;
-    v.use_disk_shader_cache = s.use_disk_shader_cache;
-    v.use_hw_shader = s.use_hw_shader;
-    v.texture_filter = static_cast<Settings::TextureFilter>(std::clamp(s.texture_filter, 0, 5));
-    v.filter_mode = s.filter_mode;
-    v.use_integer_scaling = s.use_integer_scaling;
-    SetFullscreenStretchEnabled(s.stretch_fullscreen);
-    v.show_fps = s.show_fps;
-    v.show_shader_compile_notice = s.show_shader_compile_notice;
-    v.disable_right_eye_render = s.disable_right_eye_render;
-    v.preload_textures = s.preload_textures;
-    v.dump_textures = s.dump_textures;
-    v.cpu_clock_percentage = std::clamp(s.cpu_clock_percentage, 5, 400);
-    v.is_new_3ds = s.is_new_3ds;
-    v.use_cpu_jit = s.use_cpu_jit;
-    v.region_value = std::clamp(s.region_value, -1, 6);
-    SetPointerSource(static_cast<PointerSource>(
-        std::clamp(s.pointer_source, 0, NumPointerSources - 1)));
-    SetGyroSensitivity(s.gyro_sensitivity_x, s.gyro_sensitivity_y);
-    SetLayoutCycleMask(s.layout_cycle_mask);
-    SetPauseInQuickMenu(s.pause_in_quick_menu);
-    SaveConfig();
-
-    // The 3DS system language lives in the CFG NAND savegame rather than config.ini,
-    // so it's written straight through the CFG module.
-    auto cfg = Service::CFG::GetModule(Core::System::GetInstance());
-    const auto language =
-        static_cast<Service::CFG::SystemLanguage>(std::clamp(s.language, 0, 11));
-    if (cfg->GetSystemLanguage() != language) {
-        cfg->SetSystemLanguage(language);
-        cfg->UpdateConfigNANDSavegame();
-    }
 }
 
 } // namespace SwitchFrontend

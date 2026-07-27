@@ -31,6 +31,8 @@ add_executable(citra_switch
     overlay_menu.cpp
     overlay_menu.h
     rail_icons.h
+    settings_menu.cpp
+    settings_menu.h
 )
 
 # oaknut_horizon_jit is pulled in transitively via oaknut

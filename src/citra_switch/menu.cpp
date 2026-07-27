@@ -25,6 +25,7 @@
 #include "citra_switch/menu.h"
 #include "citra_switch/menu_data.h"
 #include "citra_switch/rail_icons.h"
+#include "citra_switch/settings_menu.h"
 #include "common/horizon_boost.h"
 
 namespace SwitchFrontend {
@@ -461,268 +462,77 @@ std::string ToLowerAscii(std::string_view s) {
     return out;
 }
 
-const char* RegionName(int region) {
-    switch (region) {
-    case -1:
-        return "Auto";
-    case 0:
-        return "Japan";
-    case 1:
-        return "USA";
-    case 2:
-        return "Europe";
-    case 3:
-        return "Australia";
-    case 4:
-        return "China";
-    case 5:
-        return "Korea";
-    case 6:
-        return "Taiwan";
-    default:
-        return "Auto";
-    }
-}
+// The Settings page strip, which sits between the header and the rows.
+constexpr int kTabStripTop = kContentTop + 10;
+constexpr int kTabStripH = 34;
+constexpr int kTabPadX = 14;
+constexpr int kTabGap = 6;
 
-// Ordered to match Service::CFG::SystemLanguage.
-// The overlay font is Latin-only, so names are spelled out in English only.
-const char* LanguageName(int language) {
-    switch (language) {
-    case 0:
-        return "Japanese";
-    case 1:
-        return "English";
-    case 2:
-        return "French";
-    case 3:
-        return "German";
-    case 4:
-        return "Italian";
-    case 5:
-        return "Spanish";
-    case 6:
-        return "Simplified Chinese";
-    case 7:
-        return "Korean";
-    case 8:
-        return "Dutch";
-    case 9:
-        return "Portuguese";
-    case 10:
-        return "Russian";
-    case 11:
-        return "Traditional Chinese";
-    default:
-        return "English";
-    }
-}
-
-const char* BackendName(int api) {
-    switch (api) {
-    case 0:
-        return "Software";
-    case 1:
-        return "OpenGL";
-    case 2:
-        return "Vulkan";
-    default:
-        return "Unknown";
-    }
-}
-
-const char* TextureFilterName(int filter) {
-    switch (filter) {
-    case 1:
-        return "Anime4K";
-    case 2:
-        return "Bicubic";
-    case 3:
-        return "ScaleForce";
-    case 4:
-        return "xBRZ";
-    case 5:
-        return "MMPX";
-    default:
-        return "None";
-    }
-}
-
-std::string ResolutionText(int factor) {
-    if (factor == 0) {
-        return "Auto (window)";
-    }
-    if (factor == 1) {
-        return "Native (1x)";
-    }
-    return std::to_string(factor) + "x";
-}
-
-struct SettingRow {
-    const char* label;
-    std::string value;
+struct TabRect {
+    int x{};
+    int w{};
 };
 
-// "N of M" summary of how many layouts R3 is set to cycle through.
-std::string LayoutCycleSummary(std::uint32_t mask) {
-    const int total = GetScreenLayoutCount();
-    int enabled = 0;
-    for (int i = 0; i < total; ++i) {
-        if ((mask & (1u << i)) != 0) {
-            ++enabled;
+// Lays the page chips out as one centred row, tightening the padding rather than overflowing the
+// content area if the shared font measures wider than the nominal padding allows for.
+std::array<TabRect, NumSettingsPages> SettingsTabRects() {
+    std::array<TabRect, NumSettingsPages> rects{};
+    int text = 0;
+    for (int i = 0; i < NumSettingsPages; ++i) {
+        rects[i].w = g_font.Measure(SettingsPageName(static_cast<SettingsPage>(i)), 18);
+        text += rects[i].w;
+    }
+    const int available = kContentW - 48 - (NumSettingsPages - 1) * kTabGap;
+    const int pad = std::clamp((available - text) / (2 * NumSettingsPages), 4, kTabPadX);
+
+    int total = 0;
+    for (int i = 0; i < NumSettingsPages; ++i) {
+        rects[i].w += pad * 2;
+        total += rects[i].w + (i > 0 ? kTabGap : 0);
+    }
+    int x = kContentX + std::max(24, (kContentW - total) / 2);
+    for (int i = 0; i < NumSettingsPages; ++i) {
+        rects[i].x = x;
+        x += rects[i].w + kTabGap;
+    }
+    return rects;
+}
+
+// Where the label sits inside its chip, which follows the same tightening.
+int SettingsTabTextInset(const std::array<TabRect, NumSettingsPages>& rects, int index) {
+    return (rects[index].w -
+            g_font.Measure(SettingsPageName(static_cast<SettingsPage>(index)), 18)) /
+           2;
+}
+
+std::optional<int> SettingsTabHitTest(int x, int y) {
+    if (y < kTabStripTop || y >= kTabStripTop + kTabStripH) {
+        return std::nullopt;
+    }
+    const auto rects = SettingsTabRects();
+    for (int i = 0; i < NumSettingsPages; ++i) {
+        if (x >= rects[i].x && x < rects[i].x + rects[i].w) {
+            return i;
         }
     }
-    return std::to_string(enabled) + " of " + std::to_string(total);
+    return std::nullopt;
 }
 
-// Row order on the Settings page. BuildSettingRows and CycleSetting must agree on it.
-enum SettingRowIdx {
-    SettingRowResolution,
-    SettingRowVSync,
-    SettingRowAsyncGpu,
-    SettingRowStrictGpuSync,
-    SettingRowAsyncShaders,
-    SettingRowDiskShaderCache,
-    SettingRowHwShader,
-    SettingRowTextureFilter,
-    SettingRowLinearFiltering,
-    SettingRowIntegerScaling,
-    SettingRowStretchFullscreen,
-    SettingRowShowFps,
-    SettingRowShowShaderCompileNotice,
-    SettingRowDisableRightEye,
-    SettingRowCpuClock,
-    SettingRowNew3ds,
-    SettingRowCpuJit,
-    SettingRowRegion,
-    SettingRowLanguage,
-    SettingRowPointerSource,
-    SettingRowGyroX,
-    SettingRowGyroY,
-    SettingRowPreloadTextures,
-    SettingRowDumpTextures,
-    SettingRowPauseInQuickMenu,
-    SettingRowLayoutCycle,
-    SettingRowControllerMap,
-    SettingRowCount,
-};
-
-std::vector<SettingRow> BuildSettingRows(const MenuSettings& s) {
-    return {
-        {"Internal Resolution", ResolutionText(s.resolution_factor)},
-        {"VSync", s.use_vsync ? "On" : "Off"},
-        {"Async GPU (restart)", s.async_gpu_emulation ? "On" : "Off"},
-        {"Strict GPU Sync", s.strict_gpu_sync ? "On" : "Off"},
-        {"Async Shader Compilation", s.async_shader_compilation ? "On" : "Off"},
-        {"Disk Shader Cache", s.use_disk_shader_cache ? "On" : "Off"},
-        {"Hardware Shader", s.use_hw_shader ? "On" : "Off"},
-        {"Texture Filter", TextureFilterName(s.texture_filter)},
-        {"Linear Filtering", s.filter_mode ? "On" : "Off"},
-        {"Integer Scaling", s.use_integer_scaling ? "On" : "Off"},
-        {"Stretch Fullscreen", s.stretch_fullscreen ? "On" : "Off"},
-        {"Show FPS Counter", s.show_fps ? "On" : "Off"},
-        {"Shader Compile Notice", s.show_shader_compile_notice ? "On" : "Off"},
-        {"Disable Right Eye Render", s.disable_right_eye_render ? "On" : "Off"},
-        {"CPU Clock", std::to_string(s.cpu_clock_percentage) + "%"},
-        {"New 3DS Mode", s.is_new_3ds ? "On" : "Off"},
-        {"CPU JIT (dynarmic)", s.use_cpu_jit ? "On" : "Off"},
-        {"Console Region", RegionName(s.region_value)},
-        {"System Language", LanguageName(s.language)},
-        {"Touch Pointer Source",
-         PointerSourceName(static_cast<PointerSource>(s.pointer_source))},
-        {"Gyro Sensitivity X", std::to_string(s.gyro_sensitivity_x) + "%"},
-        {"Gyro Sensitivity Y", std::to_string(s.gyro_sensitivity_y) + "%"},
-        {"Preload Custom Textures", s.preload_textures ? "On" : "Off"},
-        {"Dump Textures", s.dump_textures ? "On" : "Off"},
-        {"Pause In Quick Menu", s.pause_in_quick_menu ? "On" : "Off"},
-        {"R3 Screen Layouts", LayoutCycleSummary(s.layout_cycle_mask)},
-        {"Controller Mapping", "Configure"},
-    };
-}
-constexpr int kNumSettings = SettingRowCount;
-// These rows open a modal picker instead of cycling a value in place.
-constexpr int kLayoutCycleRow = SettingRowLayoutCycle;
-constexpr int kControllerMapRow = SettingRowControllerMap;
-
-void CycleSetting(MenuSettings& s, int idx, int dir) {
-    switch (idx) {
-    case SettingRowResolution:
-        s.resolution_factor = std::clamp(s.resolution_factor + dir, 0, 4);
-        break;
-    case SettingRowVSync:
-        s.use_vsync = dir > 0;
-        break;
-    case SettingRowAsyncGpu:
-        s.async_gpu_emulation = dir > 0;
-        break;
-    case SettingRowStrictGpuSync:
-        s.strict_gpu_sync = dir > 0;
-        break;
-    case SettingRowAsyncShaders:
-        s.async_shader_compilation = dir > 0;
-        break;
-    case SettingRowDiskShaderCache:
-        s.use_disk_shader_cache = dir > 0;
-        break;
-    case SettingRowHwShader:
-        s.use_hw_shader = dir > 0;
-        break;
-    case SettingRowTextureFilter:
-        s.texture_filter = std::clamp(s.texture_filter + dir, 0, 5);
-        break;
-    case SettingRowLinearFiltering:
-        s.filter_mode = dir > 0;
-        break;
-    case SettingRowIntegerScaling:
-        s.use_integer_scaling = dir > 0;
-        break;
-    case SettingRowStretchFullscreen:
-        s.stretch_fullscreen = dir > 0;
-        break;
-    case SettingRowShowFps:
-        s.show_fps = dir > 0;
-        break;
-    case SettingRowShowShaderCompileNotice:
-        s.show_shader_compile_notice = dir > 0;
-        break;
-    case SettingRowDisableRightEye:
-        s.disable_right_eye_render = dir > 0;
-        break;
-    case SettingRowCpuClock:
-        s.cpu_clock_percentage = std::clamp(s.cpu_clock_percentage + dir * 5, 25, 400);
-        break;
-    case SettingRowNew3ds:
-        s.is_new_3ds = dir > 0;
-        break;
-    case SettingRowCpuJit:
-        s.use_cpu_jit = dir > 0;
-        break;
-    case SettingRowRegion:
-        s.region_value = std::clamp(s.region_value + dir, -1, 6);
-        break;
-    case SettingRowLanguage:
-        s.language = std::clamp(s.language + dir, 0, 11);
-        break;
-    case SettingRowPointerSource:
-        s.pointer_source = std::clamp(s.pointer_source + dir, 0, NumPointerSources - 1);
-        break;
-    case SettingRowGyroX:
-        s.gyro_sensitivity_x = std::clamp(s.gyro_sensitivity_x + dir * 10, 10, 500);
-        break;
-    case SettingRowGyroY:
-        s.gyro_sensitivity_y = std::clamp(s.gyro_sensitivity_y + dir * 10, 10, 500);
-        break;
-    case SettingRowPreloadTextures:
-        s.preload_textures = dir > 0;
-        break;
-    case SettingRowDumpTextures:
-        s.dump_textures = dir > 0;
-        break;
-    case SettingRowPauseInQuickMenu:
-        s.pause_in_quick_menu = dir > 0;
-        break;
-    default:
-        break;
+// swkbd prompt for the one text setting.
+std::string PromptLogFilter(const std::string& initial) {
+    SwkbdConfig kbd;
+    if (R_FAILED(swkbdCreate(&kbd, 0))) {
+        return initial;
     }
+    swkbdConfigMakePresetDefault(&kbd);
+    swkbdConfigSetHeaderText(&kbd, "Log filter");
+    swkbdConfigSetGuideText(&kbd, "e.g. *:Info Render:Debug");
+    swkbdConfigSetInitialText(&kbd, initial.c_str());
+    swkbdConfigSetStringLenMax(&kbd, 255);
+    char out[512] = {};
+    const Result rc = swkbdShow(&kbd, out, sizeof(out));
+    swkbdClose(&kbd);
+    return R_SUCCEEDED(rc) ? std::string{out} : initial;
 }
 
 // Rows on the Paths page.
@@ -1141,12 +951,17 @@ private:
     std::vector<int> filtered; // Indices into `games` after search filtering.
     int selected = 0;          // Index into `filtered`.
     int scroll_row = 0;
-    int settings_sel = 0;
-    int settings_scroll = 0; // First visible settings row.
     int paths_sel = 0;
     std::string search;
-    MenuSettings settings{};
     SwitchPaths paths{};
+
+    // Settings tab.
+    SettingsPage settings_page{SettingsPage::General};
+    std::vector<SettingsRow> settings_rows;
+    // Kept per page so switching back lands where the cursor was left.
+    std::array<int, NumSettingsPages> settings_sel{};
+    std::array<int, NumSettingsPages> settings_scroll{};
+
     Repeater repeater;
     Framebuffer fb{};
     PadState* pad_state = nullptr;
@@ -1187,7 +1002,6 @@ private:
 
     void Rescan() {
         games = ScanGames();
-        settings = GetMenuSettings();
         paths = GetPaths();
         if (install_dir.empty()) {
             install_dir = paths.roms_dir;
@@ -1216,6 +1030,25 @@ private:
             ShowBusy("Reading CIAs...");
             RefreshInstallList();
         }
+        if (tab == Tab::Settings) {
+            SetSettingsPage(settings_page);
+        }
+    }
+
+    void SetSettingsPage(SettingsPage page) {
+        settings_page = page;
+        settings_rows = BuildSettingsPage(page);
+        const int last = std::max(0, static_cast<int>(settings_rows.size()) - 1);
+        SettingsSel() = std::clamp(SettingsSel(), 0, last);
+        ScrollSettingsIntoView();
+    }
+
+    int& SettingsSel() {
+        return settings_sel[static_cast<std::size_t>(settings_page)];
+    }
+
+    int& SettingsScroll() {
+        return settings_scroll[static_cast<std::size_t>(settings_page)];
     }
 
     // True while the edited scan inputs differ from what the last scan used.
@@ -1236,7 +1069,7 @@ private:
 
     void FlushSettings() {
         if (settings_dirty) {
-            SetMenuSettings(settings);
+            CommitSettings();
             settings_dirty = false;
         }
     }
@@ -1458,8 +1291,9 @@ private:
 
     // Keeps the selected settings row inside the visible window.
     void ScrollSettingsIntoView() {
-        settings_scroll = std::clamp(settings_scroll, std::max(0, settings_sel - kSettingsVisibleRows + 1),
-                                     settings_sel);
+        int& scroll = SettingsScroll();
+        const int sel = SettingsSel();
+        scroll = std::clamp(scroll, std::max(0, sel - kSettingsVisibleRows + 1), sel);
     }
 
     void OpenLayoutPicker() {
@@ -1467,23 +1301,56 @@ private:
         layout_picker_open = true;
     }
 
+    void StepSettingsPage(int dir) {
+        SetSettingsPage(static_cast<SettingsPage>(
+            (static_cast<int>(settings_page) + dir + NumSettingsPages) % NumSettingsPages));
+    }
+
+    void OpenSettingsModal(SettingsModal modal) {
+        switch (modal) {
+        case SettingsModal::LayoutCycle:
+            OpenLayoutPicker();
+            break;
+        case SettingsModal::ControllerMap:
+            OpenRemap();
+            break;
+        case SettingsModal::LogFilter:
+            SetLogFilter(PromptLogFilter(GetLogFilter()));
+            settings_dirty = true;
+            break;
+        default:
+            break;
+        }
+    }
+
     bool HandleSettings(u64 down, u32 nav) {
+        if (down & HidNpadButton_L) {
+            StepSettingsPage(-1);
+        }
+        if (down & HidNpadButton_R) {
+            StepSettingsPage(+1);
+        }
+        if (settings_rows.empty()) {
+            if (down & HidNpadButton_B) {
+                EnterRail();
+            }
+            return false;
+        }
+
+        const int count = static_cast<int>(settings_rows.size());
+        int& sel = SettingsSel();
         if (nav & DirUp) {
-            settings_sel = std::max(0, settings_sel - 1);
+            sel = std::max(0, sel - 1);
         }
         if (nav & DirDown) {
-            settings_sel = std::min(kNumSettings - 1, settings_sel + 1);
+            sel = std::min(count - 1, sel + 1);
         }
         ScrollSettingsIntoView();
 
-        // These rows open a modal picker rather than cycling a value in place.
-        if (settings_sel == kLayoutCycleRow || settings_sel == kControllerMapRow) {
+        const SettingsRow& row = settings_rows[sel];
+        if (row.modal != SettingsModal::None) {
             if ((down & HidNpadButton_A) || (nav & DirRight)) {
-                if (settings_sel == kLayoutCycleRow) {
-                    OpenLayoutPicker();
-                } else {
-                    OpenRemap();
-                }
+                OpenSettingsModal(row.modal);
             }
             if (down & HidNpadButton_B) {
                 EnterRail();
@@ -1491,17 +1358,13 @@ private:
             return false;
         }
 
-        bool changed = false;
+        // Settings::values is edited live. FlushSettings() only batches the config.ini write.
         if (nav & DirLeft) {
-            CycleSetting(settings, settings_sel, -1);
-            changed = true;
+            row.step(-1);
+            settings_dirty = true;
         }
         if ((nav & DirRight) || (down & HidNpadButton_A)) {
-            CycleSetting(settings, settings_sel, +1);
-            changed = true;
-        }
-        // Edit the local snapshot only and use FlushSettings() later to apply to config.ini.
-        if (changed) {
+            row.step(+1);
             settings_dirty = true;
         }
         if (down & HidNpadButton_B) {
@@ -1519,7 +1382,7 @@ private:
             layout_picker_sel = (layout_picker_sel + 1) % count;
         }
         if (down & HidNpadButton_A) {
-            settings.layout_cycle_mask ^= (1u << layout_picker_sel);
+            SetLayoutCycleMask(GetLayoutCycleMask() ^ (1u << layout_picker_sel));
             settings_dirty = true;
         }
         if (down & HidNpadButton_B) {
@@ -1696,17 +1559,19 @@ private:
                 install_sel = row;
             }
         } else if (tab == Tab::Settings) {
+            if (const std::optional<int> page = SettingsTabHitTest(tx, ty)) {
+                SetSettingsPage(static_cast<SettingsPage>(*page));
+                return;
+            }
             const int visible = (ty - kSettingsTop) / kSettingsRowStride;
-            const int row = settings_scroll + visible;
+            const int row = SettingsScroll() + visible;
             if (ty >= kSettingsTop && visible < kSettingsVisibleRows && row >= 0 &&
-                row < kNumSettings) {
-                settings_sel = row;
-                if (row == kLayoutCycleRow) {
-                    OpenLayoutPicker();
-                } else if (row == kControllerMapRow) {
-                    OpenRemap();
+                row < static_cast<int>(settings_rows.size())) {
+                SettingsSel() = row;
+                if (settings_rows[row].modal != SettingsModal::None) {
+                    OpenSettingsModal(settings_rows[row].modal);
                 } else {
-                    CycleSetting(settings, settings_sel, tx > kContentX + kContentW / 2 ? +1 : -1);
+                    settings_rows[row].step(tx > kContentX + kContentW / 2 ? +1 : -1);
                     settings_dirty = true;
                 }
             }
@@ -2121,7 +1986,7 @@ private:
     static constexpr int kRowH = 41;
 
     // Scroll the settings window now that it has overflowed the size of the screen.
-    static constexpr int kSettingsTop = kContentTop + 16;
+    static constexpr int kSettingsTop = kTabStripTop + kTabStripH + 12;
     static constexpr int kSettingsRowStride = kRowH + 8;
     static constexpr int kSettingsFooterH = 52;
     static constexpr int kSettingsVisibleRows =
@@ -2137,31 +2002,55 @@ private:
     static constexpr int kRemapVisibleRows =
         (kRemapPanelH - kRemapTopPad - kRemapBottomPad) / kRemapRowH;
 
+    void DrawSettingsTabs(Canvas& c) {
+        const auto rects = SettingsTabRects();
+        for (int i = 0; i < NumSettingsPages; ++i) {
+            const bool on = i == static_cast<int>(settings_page);
+            if (on) {
+                c.FillRoundRect(rects[i].x, kTabStripTop, rects[i].w, kTabStripH, kTabStripH / 2,
+                                kColAccent);
+            }
+            const char* name = SettingsPageName(static_cast<SettingsPage>(i));
+            g_font.Draw(c, rects[i].x + SettingsTabTextInset(rects, i),
+                        CenterBaseline(kTabStripTop, kTabStripH, 18), name, 18,
+                        on ? kColOnAccent : kColTextDim);
+        }
+    }
+
     void DrawSettingsPage(Canvas& c) {
         DrawHeader(c, "");
+        DrawSettingsTabs(c);
+
         const bool content_focus = focus == Focus::Content;
-        const auto rows = BuildSettingRows(settings);
+        const int count = static_cast<int>(settings_rows.size());
+        const int sel = SettingsSel();
+        const int scroll = SettingsScroll();
         const int x = kContentX + 24;
         const int w = kContentW - 48;
-        const int last = std::min(static_cast<int>(rows.size()), settings_scroll + kSettingsVisibleRows);
-        for (int i = settings_scroll; i < last; ++i) {
-            const int y = kSettingsTop + (i - settings_scroll) * kSettingsRowStride;
-            const bool on = i == settings_sel;
+        const int last = std::min(count, scroll + kSettingsVisibleRows);
+        for (int i = scroll; i < last; ++i) {
+            const int y = kSettingsTop + (i - scroll) * kSettingsRowStride;
+            const bool on = i == sel;
             if (on) {
                 c.FillRoundRect(x, y, w, kRowH, 10, content_focus ? kColSurfaceHi : kColSurface);
                 c.FillRoundRect(x, y + 8, 4, kRowH - 16, 2,
                                 content_focus ? kColAccent : kColBadge);
             }
-            g_font.Draw(c, x + 20, CenterBaseline(y, kRowH, 22), rows[i].label, 22, kColText);
-            const int vw = g_font.Measure(rows[i].value, 22);
-            g_font.Draw(c, x + w - 24 - vw, CenterBaseline(y, kRowH, 22), rows[i].value, 22,
+            g_font.Draw(c, x + 20, CenterBaseline(y, kRowH, 22), settings_rows[i].label, 22,
+                        kColText);
+            const std::string value = settings_rows[i].value();
+            const int max_value_w = w - 44 - g_font.Measure(settings_rows[i].label, 22);
+            const std::string shown = g_font.Truncate(value, 22, std::max(60, max_value_w));
+            const int vw = g_font.Measure(shown, 22);
+            g_font.Draw(c, x + w - 24 - vw, CenterBaseline(y, kRowH, 22), shown, 22,
                         on && content_focus ? kColAccent : kColTextDim);
         }
         DrawListScrollbar(c, kScreenW - 20, kSettingsTop, kSettingsVisibleRows, kSettingsRowStride,
-                          static_cast<int>(rows.size()), settings_scroll);
+                          count, scroll);
 
         const int footer_y = kContentBottom - kSettingsFooterH;
-        const std::string backend = std::string{"Graphics backend: "} + BackendName(settings.graphics_api);
+        const std::string backend =
+            std::string{"Graphics backend: "} + ActiveGraphicsBackendName();
         g_font.Draw(c, x + 20, footer_y + 16, backend, 18, kColTextDim);
         g_font.Draw(c, x + 20, footer_y + 42, "Changes apply the next time you launch a game.", 18,
                     kColTextDim);
@@ -2171,12 +2060,14 @@ private:
         } else {
             int hx = kContentX + 24;
             const int hy = kContentBottom + (kHintH - 26) / 2;
-            if (settings_sel == kLayoutCycleRow || settings_sel == kControllerMapRow) {
+            const bool modal = count > 0 && settings_rows[sel].modal != SettingsModal::None;
+            if (modal) {
                 hx += DrawHint(c, hx, hy, "A", "Configure") + 22;
             } else {
                 hx += DrawHint(c, hx, hy, "<>", "Change") + 22;
                 hx += DrawHint(c, hx, hy, "A", "Next") + 22;
             }
+            hx += DrawHint(c, hx, hy, "L R", "Page") + 22;
             hx += DrawHint(c, hx, hy, "B", "Menu") + 22;
             DrawHint(c, hx, hy, "+ -", "Exit");
         }
@@ -2207,7 +2098,7 @@ private:
                 c.FillRoundRect(rx, ry, rw, row_h - 4, 8, kColSurfaceHi);
                 c.FillRoundRect(rx, ry + 8, 4, row_h - 20, 2, kColAccent);
             }
-            const bool enabled = (settings.layout_cycle_mask & (1u << i)) != 0;
+            const bool enabled = (GetLayoutCycleMask() & (1u << i)) != 0;
             g_font.Draw(c, rx + 20, CenterBaseline(ry, row_h - 4, 20), GetScreenLayoutName(i), 20,
                         kColText);
             const char* state = enabled ? "On" : "Off";
