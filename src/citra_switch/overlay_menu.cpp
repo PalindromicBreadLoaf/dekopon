@@ -91,7 +91,7 @@ constexpr int kGyroStep = 10;
 // Percentage step and range for the emulated CPU clock.
 constexpr int kClockStep = 5;
 constexpr int kClockMin = 25;
-constexpr int kClockMax = 400;
+constexpr int kClockMax = 800;
 
 // Cheats past this many spill onto further sub-pages.
 constexpr int kCheatsPerPage = 8;
