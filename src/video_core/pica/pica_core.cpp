@@ -508,12 +508,13 @@ void PicaCore::HandleSpecialRegBatch(u32 id, const u32* values, u32 count) {
     case PICA_REG_INDEX(lighting.lut_data[6]):
     case PICA_REG_INDEX(lighting.lut_data[7]): {
         auto& lut_config = regs.internal.lighting.lut_config;
-        ASSERT_MSG(lut_config.index + count <= 256,
-                   "lut_config.index exceeded maximum value of 255!");
+        auto& lut = lighting.luts[lut_config.type];
 
+        // The index is an 8-bit register field, so a burst running past the end of the
+        // table wraps back to entry 0 as it does on hardware.
         for (u32 i = 0; i < count; i++) {
             const u32 prev =
-                std::exchange(lighting.luts[lut_config.type][lut_config.index + i].raw, values[i]);
+                std::exchange(lut[(lut_config.index + i) % lut.size()].raw, values[i]);
             lighting.lut_dirty |= (prev != values[i]) << lut_config.type;
         }
         lut_config.index.Assign(lut_config.index + count);
