@@ -5,6 +5,7 @@
 #include <mutex>
 #include "common/horizon_thread.h"
 #include "common/thread.h"
+#include "common/settings.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_master_semaphore.h"
 
@@ -163,7 +164,7 @@ void MasterSemaphoreFence::SubmitWork(vk::CommandBuffer cmdbuf, vk::Semaphore wa
 void MasterSemaphoreFence::WaitThread(std::stop_token token) {
     Common::SetCurrentThreadName("VulkanFence");
     // Mostly blocked on GPU fences
-    Common::Horizon::PinCurrentThreadPreferred({3, 0});
+    Common::Horizon::PinGraphicsSupportThread(Settings::values.async_gpu_emulation.GetValue());
     const vk::Device device{instance.GetDevice()};
     while (!token.stop_requested()) {
         vk::Fence fence;

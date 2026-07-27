@@ -42,7 +42,9 @@ void RendererBase::UpdateCurrentFramebufferLayout(bool is_portrait_mode) {
 
 void RendererBase::EndFrame() {
     current_frame++;
+}
 
+void RendererBase::EndFrameOnEmulationThread() {
     system.perf_stats->EndSystemFrame();
 
     render_window.PollEvents();

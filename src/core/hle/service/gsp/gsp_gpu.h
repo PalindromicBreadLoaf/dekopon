@@ -106,7 +106,7 @@ public:
      * Signals that the specified interrupt type has occurred to userland code
      * @param interrupt_id ID of interrupt that is being signalled
      */
-    void SignalInterrupt(InterruptId interrupt_id, u64 wait_delay_ns);
+    void SignalInterrupt(InterruptId interrupt_id, u64 wait_delay_ns, u64 elapsed_ns = 0);
 
     /**
      * Retrieves the framebuffer info stored in the GSP shared memory for the
@@ -145,7 +145,8 @@ private:
      * @param interrupt_id ID of interrupt that is being signalled.
      * @param thread_id GSP thread that will receive the interrupt.
      */
-    void SignalInterruptForThread(InterruptId interrupt_id, u32 thread_id, u64 wait_delay_ns);
+    void SignalInterruptForThread(InterruptId interrupt_id, u32 thread_id, u64 wait_delay_ns,
+                                  u64 elapsed_ns);
 
     void ProcessPendingInterrupt(size_t pending_interrupt_id);
 

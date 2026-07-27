@@ -9,6 +9,11 @@
 
 namespace VideoCore {
 bool RightEyeDisabler::ShouldAllowCmdQueueTrigger(PAddr addr, u32 size) {
+    return ShouldAllowCmdQueueTrigger(addr,
+                                      gpu.impl->memory.GetPhysicalRef(addr).GetReadBytes<u8>(size));
+}
+
+bool RightEyeDisabler::ShouldAllowCmdQueueTrigger(PAddr addr, std::span<const u8> commands) {
     if (!enabled || !enable_for_frame)
         return true;
 
@@ -20,7 +25,7 @@ bool RightEyeDisabler::ShouldAllowCmdQueueTrigger(PAddr addr, u32 size) {
     }
     cmd_queue_trigger_happened = true;
 
-    auto guess = gpu.impl->pica.GuessCmdRenderProperties(addr, size);
+    auto guess = gpu.impl->pica.GuessCmdRenderProperties(addr, commands);
     if (guess.vp_height == top_screen_size && !top_screen_blocked) {
         if (top_screen_buf == 0) {
             top_screen_buf = guess.paddr;

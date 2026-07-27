@@ -6,6 +6,7 @@
 #include <utility>
 #include "common/horizon_thread.h"
 #include "common/microprofile.h"
+#include "common/settings.h"
 #include "common/thread.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
@@ -118,7 +119,7 @@ void Scheduler::DispatchWork() {
 void Scheduler::WorkerThread(std::stop_token stop_token) {
     Common::SetCurrentThreadName("VulkanWorker");
     // Keep GPU command submission off the CPU JIT core (2) and the audio core (1)
-    Common::Horizon::PinCurrentThreadPreferred({3, 0});
+    Common::Horizon::PinGraphicsSupportThread(Settings::values.async_gpu_emulation.GetValue());
 
     const auto TryPopQueue{[this](auto& work) -> bool {
         if (work_queue.empty()) {

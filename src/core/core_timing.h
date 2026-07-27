@@ -265,6 +265,16 @@ public:
                        std::size_t core_id = std::numeric_limits<std::size_t>::max(),
                        bool thread_safe_mode = false);
 
+    /**
+     * Queues an event from another host thread at an absolute emulated tick.
+     *
+     * The timestamp must be captured by the emulation thread. Unlike ScheduleEvent's generic
+     * thread-safe mode, this does not add the two-slice safety delay and does not read timer state
+     * from the calling thread.
+     */
+    void ScheduleEventThreadsafeAt(s64 timeout, const TimingEventType* event_type,
+                                   std::uintptr_t user_data, std::size_t core_id);
+
     void UnscheduleEvent(const TimingEventType* event_type, std::uintptr_t user_data);
 
     /// We only permit one event of each type in the queue at a time.

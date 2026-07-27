@@ -35,6 +35,11 @@ public:
     explicit CustomTexManager(Core::System& system);
     ~CustomTexManager();
 
+    /// Sets the application title used for texture load and dump paths.
+    void SetTitleId(u64 title_id_) {
+        title_id = title_id_;
+    }
+
     /// Processes queued texture uploads
     void TickFrame();
 
@@ -90,7 +95,6 @@ private:
     void ComputeMemoryBudget();
 
 private:
-    Core::System& system;
     Frontend::ImageInterface& image_interface;
     std::unordered_set<u64> dumped_textures;
     std::unordered_map<u64, std::unique_ptr<Material>> material_map;
@@ -100,6 +104,7 @@ private:
     std::unique_ptr<Common::ThreadWorker> workers;
     std::atomic<u64> custom_tex_mem_usage{0};
     u64 max_custom_tex_mem{0};
+    u64 title_id{};
     bool textures_loaded{false};
     bool async_custom_loading{true};
     bool skip_mipmap{false};

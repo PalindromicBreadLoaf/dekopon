@@ -1576,7 +1576,11 @@ RendererVulkan::OverlayDraw RendererVulkan::PrepareFpsOverlay(
     const auto now = std::chrono::steady_clock::now();
     if (overlay_last_update.time_since_epoch().count() == 0 ||
         now - overlay_last_update >= std::chrono::milliseconds(500)) {
+#ifdef __SWITCH__
+        overlay_game_fps = static_cast<float>(system.GetLastPerfStats().game_fps);
+#else
         overlay_game_fps = static_cast<float>(system.GetAndResetPerfStats().game_fps);
+#endif
         overlay_last_update = now;
     }
 

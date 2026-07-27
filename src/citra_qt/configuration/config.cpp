@@ -710,6 +710,8 @@ void QtConfig::ReadRendererValues() {
     ReadGlobalSetting(Settings::values.disable_spirv_optimizer);
     ReadGlobalSetting(Settings::values.async_shader_compilation);
     ReadGlobalSetting(Settings::values.async_presentation);
+    ReadGlobalSetting(Settings::values.async_gpu_emulation);
+    ReadGlobalSetting(Settings::values.strict_gpu_sync);
     ReadGlobalSetting(Settings::values.use_hw_shader);
     ReadGlobalSetting(Settings::values.shaders_accurate_mul);
     ReadGlobalSetting(Settings::values.use_disk_shader_cache);
@@ -1259,6 +1261,8 @@ void QtConfig::SaveRendererValues() {
     WriteGlobalSetting(Settings::values.disable_spirv_optimizer);
     WriteGlobalSetting(Settings::values.async_shader_compilation);
     WriteGlobalSetting(Settings::values.async_presentation);
+    WriteGlobalSetting(Settings::values.async_gpu_emulation);
+    WriteGlobalSetting(Settings::values.strict_gpu_sync);
     WriteGlobalSetting(Settings::values.use_hw_shader);
     WriteGlobalSetting(Settings::values.shaders_accurate_mul);
     WriteGlobalSetting(Settings::values.use_disk_shader_cache);

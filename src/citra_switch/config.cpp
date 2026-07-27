@@ -135,6 +135,8 @@ private:
         ReadSetting("Renderer", Settings::values.use_gles);
         ReadSetting("Renderer", Settings::values.resolution_factor);
         ReadSetting("Renderer", Settings::values.use_vsync);
+        ReadSetting("Renderer", Settings::values.async_gpu_emulation);
+        ReadSetting("Renderer", Settings::values.strict_gpu_sync);
         ReadSetting("Renderer", Settings::values.async_shader_compilation);
         ReadSetting("Renderer", Settings::values.use_disk_shader_cache);
         ReadSetting("Renderer", Settings::values.use_hw_shader);
@@ -218,6 +220,9 @@ private:
         ss << "use_gles = " << (v.use_gles.GetValue() ? "true" : "false") << '\n';
         ss << "resolution_factor = " << v.resolution_factor.GetValue() << '\n';
         ss << "use_vsync = " << (v.use_vsync.GetValue() ? "true" : "false") << '\n';
+        ss << "async_gpu_emulation = " << (v.async_gpu_emulation.GetValue() ? "true" : "false")
+           << '\n';
+        ss << "strict_gpu_sync = " << (v.strict_gpu_sync.GetValue() ? "true" : "false") << '\n';
         ss << "async_shader_compilation = "
            << (v.async_shader_compilation.GetValue() ? "true" : "false") << '\n';
         ss << "use_disk_shader_cache = " << (v.use_disk_shader_cache.GetValue() ? "true" : "false")

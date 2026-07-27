@@ -13,6 +13,8 @@ add_library(video_core STATIC EXCLUDE_FROM_ALL
     gpu.h
     gpu_debugger.h
     gpu_impl.h
+    gpu_thread.cpp
+    gpu_thread.h
     overlay.cpp
     overlay.h
     pica_types.h

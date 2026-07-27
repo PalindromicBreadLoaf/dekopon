@@ -467,6 +467,8 @@ MenuSettings GetMenuSettings() {
     return MenuSettings{
         .resolution_factor = static_cast<int>(v.resolution_factor.GetValue()),
         .use_vsync = v.use_vsync.GetValue(),
+        .async_gpu_emulation = v.async_gpu_emulation.GetValue(),
+        .strict_gpu_sync = v.strict_gpu_sync.GetValue(),
         .async_shader_compilation = v.async_shader_compilation.GetValue(),
         .use_disk_shader_cache = v.use_disk_shader_cache.GetValue(),
         .use_hw_shader = v.use_hw_shader.GetValue(),
@@ -497,6 +499,8 @@ void SetMenuSettings(const MenuSettings& s) {
     auto& v = Settings::values;
     v.resolution_factor = static_cast<u32>(std::clamp(s.resolution_factor, 0, 10));
     v.use_vsync = s.use_vsync;
+    v.async_gpu_emulation = s.async_gpu_emulation;
+    v.strict_gpu_sync = s.strict_gpu_sync;
     v.async_shader_compilation = s.async_shader_compilation;
     v.use_disk_shader_cache = s.use_disk_shader_cache;
     v.use_hw_shader = s.use_hw_shader;

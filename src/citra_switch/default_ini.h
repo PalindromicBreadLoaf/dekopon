@@ -25,6 +25,10 @@ use_gles =
 resolution_factor =
 # Synchronise presentation to vblank (1, default).
 use_vsync =
+# Run PICA and renderer work on a dedicated host thread (0, default, restart required).
+async_gpu_emulation = false
+# Drain after each GPU trigger for compatibility testing (0, default).
+strict_gpu_sync = false
 # Compile shaders on a background thread to reduce hitching (0, default).
 async_shader_compilation =
 # Persist compiled shaders to the SD card to cut post first-run stutter (1, default).

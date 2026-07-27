@@ -6,9 +6,12 @@
 
 #include <functional>
 #include <memory>
+#include <span>
+#include <vector>
 #include <boost/serialization/access.hpp>
 
 #include "core/hle/service/gsp/gsp_interrupt.h"
+#include "video_core/gpu_thread.h"
 
 namespace Service::GSP {
 struct Command;
@@ -57,8 +60,20 @@ public:
     /// Notify rasterizer that any caches of the specified region should be invalidated
     void InvalidateRegion(PAddr addr, u32 size);
 
+    /// Flushes and invalidates caches of the specified region.
+    void FlushAndInvalidateRegion(PAddr addr, u32 size);
+
     /// Flushes and invalidates all memory in the rasterizer cache and removes any leftover state.
     void ClearAll(bool flush);
+
+    /// Waits until all queued GPU work has completed.
+    void WaitIdle();
+
+    /// Presents the current renderer output.
+    void SwapBuffers();
+
+    /// Recalculates the frontend framebuffer layout on the GPU owner thread.
+    void UpdateCurrentFramebufferLayout(bool is_portrait_mode = false);
 
     /// Executes the provided GSP command.
     void Execute(const Service::GSP::Command& command);
@@ -74,6 +89,12 @@ public:
 
     /// Writes the provided value to the GPU virtual address.
     void WriteReg(VAddr addr, u32 data);
+
+    /// Updates selected bits of a GPU register.
+    void WriteRegWithMask(VAddr addr, u32 data, u32 mask);
+
+    /// Writes a sequential block of GPU registers.
+    void WriteRegs(VAddr addr, std::span<const u8> data, std::span<const u8> masks = {});
 
     /// Returns a mutable reference to the renderer.
     [[nodiscard]] VideoCore::RendererBase& Renderer();
@@ -94,6 +115,8 @@ public:
         return *right_eye_disabler;
     }
 
+    void SetRightEyeEnabled(bool enabled);
+
     void ApplyPerProgramSettings(u64 program_ID);
 
     /// Recreates the renderer (for GL context reset in libretro)
@@ -102,8 +125,40 @@ public:
     /// Releases the renderer (for GL context destroy in libretro)
     void ReleaseRenderer();
 
+    void QueuePageTableUpdate(PAddr start, u32 size, bool cached);
+    [[nodiscard]] bool IsOnAsyncGPUThread() const;
+
 private:
+    /// Describes the side effects a single register write has, as seen by the producer.
+    struct RegWriteInfo {
+        bool triggers_work{};
+        bool has_command_list{};
+        u32 command_list_index{};
+        PAddr command_list_address{};
+        u32 command_list_size{};
+    };
+
+    void ProcessCommand(const GPUCommand& command, std::span<const u8> payload);
+    void ProcessSync(const GPUCommandData& data, std::span<const u8> payload = {});
+    void ProcessWriteReg(const WriteRegCommand& command);
+    RegWriteInfo PrepareWriteReg(VAddr addr, u32 data, u32 mask);
+    void FlushRegWriteBatch();
+    void DispatchCmdList(u32 index, PAddr address, u32 size);
+    bool ShouldUseAsync() const;
+    void RefreshAsyncMode();
+    u32 CurrentCoreId() const;
+    u64 QueueAsync(const GPUCommandData& command, std::span<const u8> payload = {});
+
+    /// Quiesces the GPU thread so the caller may touch renderer and PICA state directly.
+    void SyncGpuThread();
+    void FlushPendingInvalidate();
+
+    void DrainPageTableUpdates();
+    void SignalInterruptFromGPU(Service::GSP::InterruptId interrupt_id, u64 delay_ns, u32 core_id);
+    [[nodiscard]] std::span<const u8> GuestCommandList(PAddr address, u32 size) const;
+
     void SubmitCmdList(u32 index);
+    void SubmitCmdList(u32 index, PAddr address, std::span<const u8> commands);
 
     // Interrupt index must be 0 or 1 to signal the relative PSC interrupt.
     void MemoryFill(u32 index, u32 intr_index);
@@ -111,6 +166,8 @@ private:
     void MemoryTransfer();
 
     void VBlankCallback(uintptr_t user_data, s64 cycles_late);
+    void AsyncInterruptCallback(uintptr_t user_data, s64 cycles_late);
+    void PageTableUpdateCallback(uintptr_t user_data, s64 cycles_late);
 
     friend class boost::serialization::access;
     template <class Archive>
@@ -120,6 +177,7 @@ private:
 
 private:
     friend class RightEyeDisabler;
+    friend class GPUThread;
     struct Impl;
     std::unique_ptr<Impl> impl;
 

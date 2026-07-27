@@ -73,6 +73,9 @@ public:
     /// Ends the current frame
     void EndFrame();
 
+    /// Performs emulation-thread frame accounting and pacing for a VBlank.
+    void EndFrameOnEmulationThread();
+
     f32 GetCurrentFPS() const {
         return current_fps;
     }

@@ -255,13 +255,23 @@ static constexpr std::array<u32, 16> ExpandBitsToBytes = {
  * that would make debugging more complicated.
  */
 [[gnu::hot]] void PicaCore::ProcessCmdList(PAddr list, u32 size, bool ignore_list) {
+    ProcessCmdList(list, memory.GetPhysicalPointer(list), size, ignore_list);
+}
+
+[[gnu::hot]] void PicaCore::ProcessCmdList(PAddr list, std::span<const u8> commands,
+                                           bool ignore_list) {
+    ProcessCmdList(list, commands.data(), static_cast<u32>(commands.size()), ignore_list);
+}
+
+[[gnu::hot]] void PicaCore::ProcessCmdList(PAddr list, const u8* commands, u32 size,
+                                           bool ignore_list) {
     if (ignore_list) {
-        signal_interrupt(Service::GSP::InterruptId::P3D, delay_generator.CalculateAndResetDelay());
+        signal_interrupt(Service::GSP::InterruptId::P3D, delay_generator.CalculateAndResetDelay(),
+                         0);
         return;
     }
 
-    const u8* head = memory.GetPhysicalPointer(list);
-    cmd_list.Reset(list, head, size);
+    cmd_list.Reset(list, commands, size);
 
     bool stop_requested = false;
     bool skip_fast_path = false;
@@ -580,7 +590,7 @@ void PicaCore::HandleSpecialReg(u32 id, u32 value, bool& stop_requested) {
         // https://problemkaputt.de/gbatek-3ds-gpu-internal-registers-finalize-interrupt-registers.htm
         if (any_byte_match(regs.internal.reg_array[id], regs.internal.irq_compare)) [[likely]] {
             signal_interrupt(Service::GSP::InterruptId::P3D,
-                             delay_generator.CalculateAndResetDelay());
+                             delay_generator.CalculateAndResetDelay(), 0);
             if (regs.internal.irq_autostop) [[likely]] {
                 stop_requested = true;
             }
@@ -1169,9 +1179,18 @@ void PicaCore::LoadVertices(bool is_indexed) {
 }
 
 PicaCore::RenderPropertiesGuess PicaCore::GuessCmdRenderProperties(PAddr list, u32 size) {
+    return GuessCmdRenderProperties(list, memory.GetPhysicalPointer(list), size);
+}
+
+PicaCore::RenderPropertiesGuess PicaCore::GuessCmdRenderProperties(PAddr list,
+                                                                   std::span<const u8> commands) {
+    return GuessCmdRenderProperties(list, commands.data(), static_cast<u32>(commands.size()));
+}
+
+PicaCore::RenderPropertiesGuess PicaCore::GuessCmdRenderProperties(PAddr list, const u8* commands,
+                                                                   u32 size) {
     // Initialize command list tracking.
-    const u8* head = memory.GetPhysicalPointer(list);
-    cmd_list.Reset(list, head, size);
+    cmd_list.Reset(list, commands, size);
 
     constexpr size_t max_iterations = 0x100;
 

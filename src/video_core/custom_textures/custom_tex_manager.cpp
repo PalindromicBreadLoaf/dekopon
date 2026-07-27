@@ -13,8 +13,6 @@
 #include "common/texture.h"
 #include "core/core.h"
 #include "core/frontend/image_interface.h"
-#include "core/hle/kernel/kernel.h"
-#include "core/hle/kernel/process.h"
 #include "video_core/custom_textures/custom_tex_manager.h"
 #include "video_core/rasterizer_cache/surface_params.h"
 #include "video_core/rasterizer_cache/utils.h"
@@ -59,7 +57,7 @@ MapType MakeMapType(std::string_view ext) {
 } // Anonymous namespace
 
 CustomTexManager::CustomTexManager(Core::System& system_)
-    : system{system_}, image_interface{*system.GetImageInterface()},
+    : image_interface{*system_.GetImageInterface()},
       async_custom_loading{Settings::values.async_custom_loading.GetValue()} {}
 
 CustomTexManager::~CustomTexManager() = default;
@@ -98,7 +96,6 @@ void CustomTexManager::FindCustomTextures() {
     }
     ComputeMemoryBudget();
 
-    const u64 title_id = system.Kernel().GetCurrentProcess()->codeset->program_id;
     const auto textures = GetTextures(title_id);
     if (!ReadConfig(title_id)) {
         use_new_hash = false;
@@ -245,14 +242,13 @@ void CustomTexManager::PreloadTextures(const std::atomic_bool& stop_run,
 
 void CustomTexManager::DumpTexture(const SurfaceParams& params, u32 level, std::span<u8> data,
                                    u64 data_hash) {
-    const u64 program_id = system.Kernel().GetCurrentProcess()->codeset->program_id;
     const u32 data_size = static_cast<u32>(data.size());
     const u32 width = params.width;
     const u32 height = params.height;
     const PixelFormat format = params.pixel_format;
 
     std::string dump_path = fmt::format(
-        "{}textures/{:016X}/", FileUtil::GetUserPath(FileUtil::UserPath::DumpDir), program_id);
+        "{}textures/{:016X}/", FileUtil::GetUserPath(FileUtil::UserPath::DumpDir), title_id);
     if (!FileUtil::CreateFullPath(dump_path)) {
         LOG_ERROR(Render, "Unable to create {}", dump_path);
         return;

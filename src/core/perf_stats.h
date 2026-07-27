@@ -169,15 +169,15 @@ private:
     Clock::duration accumulated_gpu_time = Clock::duration::zero();
 
     Clock::time_point start_swap_time = reset_point;
-    Clock::duration accumulated_swap_time = Clock::duration::zero();
+    std::atomic<s64> accumulated_swap_time_ns{};
 
     /// Last recorded performance statistics.
-    Results last_stats;
+    Results last_stats{};
 };
 
 class FrameLimiter {
 public:
-    using Clock = std::chrono::high_resolution_clock;
+    using Clock = std::chrono::steady_clock;
 
     void DoFrameLimiting(std::chrono::microseconds current_system_time_us);
 

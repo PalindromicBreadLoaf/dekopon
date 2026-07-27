@@ -102,6 +102,13 @@ void Timing::ScheduleEvent(s64 cycles_into_future, const TimingEventType* event_
     }
 }
 
+void Timing::ScheduleEventThreadsafeAt(s64 timeout, const TimingEventType* event_type,
+                                       std::uintptr_t user_data, std::size_t core_id) {
+    ASSERT(event_type != nullptr);
+    ASSERT(core_id < timers.size());
+    timers[core_id]->ts_queue.Push(Event{timeout, 0, user_data, event_type});
+}
+
 void Timing::UnscheduleEvent(const TimingEventType* event_type, std::uintptr_t user_data) {
     if (event_queue_locked) {
         return;

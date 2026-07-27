@@ -37,6 +37,8 @@ std::atomic<bool> s_stop{true};
 std::atomic<bool> s_load_ok{false};
 // Freezes the guest between run loop slices.
 std::atomic<bool> s_paused{false};
+// Layout requests originate on the frontend thread and are consumed by the sole GPU producer.
+std::atomic<bool> s_layout_update_pending{false};
 
 // How long the paused loop waits between repaints.
 constexpr auto kPausedFrameInterval = std::chrono::milliseconds(8);
@@ -93,7 +95,7 @@ std::size_t s_layout_index = 0;
 // Bitmask of presets R3 cycles through. Bit i set means preset i is in the rotation.
 std::atomic<std::uint32_t> s_layout_cycle_mask{(1u << s_layout_presets.size()) - 1};
 
-// Applies the preset at s_layout_index to the live settings and relays out the framebuffer.
+// Applies the preset at s_layout_index and requests a framebuffer relayout.
 void ApplyCurrentLayout() {
     const ScreenLayoutPreset& preset = s_layout_presets[s_layout_index];
     Settings::values.layout_option = preset.layout;
@@ -101,7 +103,7 @@ void ApplyCurrentLayout() {
     Settings::values.upright_screen = preset.upright_screen;
     Settings::values.upright_screen_flipped = preset.upright_flipped;
     Settings::values.small_screen_position = preset.small_screen_position;
-    Core::System::GetInstance().GPU().Renderer().UpdateCurrentFramebufferLayout();
+    s_layout_update_pending.store(true, std::memory_order_release);
     LOG_INFO(Frontend, "Screen layout: {}", preset.name);
 }
 
@@ -202,9 +204,12 @@ void EmuThread(std::string path) {
 
     LOG_INFO(Frontend, "Emulation started (program id {:016X})", program_id);
     while (!s_stop) {
+        if (s_layout_update_pending.exchange(false, std::memory_order_acq_rel)) {
+            system.GPU().UpdateCurrentFramebufferLayout();
+        }
         if (s_paused.load(std::memory_order_relaxed)) {
             // The overlay is only drawn as part of a frame present, so the last frame has to keep being presented.
-            system.GPU().Renderer().SwapBuffers();
+            system.GPU().SwapBuffers();
             std::this_thread::sleep_for(kPausedFrameInterval);
             continue;
         }
@@ -308,7 +313,7 @@ void StepOverlayScreenPosition(int delta) {
     const int current = static_cast<int>(Settings::values.overlay_screen_position.GetValue());
     Settings::values.overlay_screen_position =
         static_cast<Settings::SmallScreenPosition>(((current + delta) % count + count) % count);
-    system.GPU().Renderer().UpdateCurrentFramebufferLayout();
+    s_layout_update_pending.store(true, std::memory_order_release);
 }
 
 const char* OverlayScreenPositionName() {
@@ -325,7 +330,7 @@ void StepOverlayScreenSize(int delta) {
 
     Settings::values.overlay_screen_size = static_cast<u16>(std::max(
         0, Settings::values.overlay_screen_size.GetValue() + delta * kOverlaySizeStep));
-    system.GPU().Renderer().UpdateCurrentFramebufferLayout();
+    s_layout_update_pending.store(true, std::memory_order_release);
 }
 
 int GetOverlayScreenSize() {
@@ -340,7 +345,7 @@ void StepOverlayScreenOpacity(int delta) {
 
     Settings::values.overlay_screen_opacity = static_cast<u16>(std::max(
         0, Settings::values.overlay_screen_opacity.GetValue() + delta * kOverlayOpacityStep));
-    system.GPU().Renderer().UpdateCurrentFramebufferLayout();
+    s_layout_update_pending.store(true, std::memory_order_release);
 }
 
 int GetOverlayScreenOpacity() {
@@ -355,7 +360,7 @@ void StepScreenGap(int delta) {
 
     Settings::values.screen_gap =
         std::max(0, Settings::values.screen_gap.GetValue() + delta * kScreenGapStep);
-    system.GPU().Renderer().UpdateCurrentFramebufferLayout();
+    s_layout_update_pending.store(true, std::memory_order_release);
 }
 
 int GetScreenGap() {
@@ -401,7 +406,7 @@ void ToggleSwapScreens() {
     }
 
     SyncLayoutIndex();
-    system.GPU().Renderer().UpdateCurrentFramebufferLayout();
+    s_layout_update_pending.store(true, std::memory_order_release);
 }
 
 const char* CurrentScreenLayoutName() {

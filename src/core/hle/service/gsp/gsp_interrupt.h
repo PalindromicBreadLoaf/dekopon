@@ -48,6 +48,6 @@ struct InterruptRelayQueue {
 };
 static_assert(sizeof(InterruptRelayQueue) == 0x40, "InterruptRelayQueue struct has incorrect size");
 
-using InterruptHandler = std::function<void(InterruptId, u64)>;
+using InterruptHandler = std::function<void(InterruptId, u64, u64)>;
 
 } // namespace Service::GSP

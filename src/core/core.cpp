@@ -152,6 +152,7 @@ System::ResultStatus System::RunLoop(bool tight_loop) {
         save_state_request_status = SaveStateStatus::NONE;
         LOG_INFO(Core, "Begin load of slot {}", slot);
         try {
+            gpu->WaitIdle();
             System::LoadState(slot);
             LOG_INFO(Core, "Load completed");
         } catch (const std::exception& e) {
@@ -167,6 +168,7 @@ System::ResultStatus System::RunLoop(bool tight_loop) {
         const u32 slot = save_state_slot;
         LOG_INFO(Core, "Begin save to slot {}", slot);
         try {
+            gpu->WaitIdle();
             System::SaveState(slot);
             LOG_INFO(Core, "Save completed");
         } catch (const std::exception& e) {
@@ -461,6 +463,7 @@ System::ResultStatus System::Load(Frontend::EmuWindow& emu_window, const std::st
 
     perf_stats = std::make_unique<PerfStats>(title_id);
 
+    custom_tex_manager->SetTitleId(title_id);
     if (Settings::values.dump_textures) {
         custom_tex_manager->PrepareDumping(title_id);
     }
@@ -596,9 +599,10 @@ System::ResultStatus System::Init(Frontend::EmuWindow& emu_window,
 
     auto gsp = service_manager->GetService<Service::GSP::GSP_GPU>("gsp::Gpu");
     gpu = std::make_unique<VideoCore::GPU>(*this, emu_window, secondary_window);
-    gpu->SetInterruptHandler([gsp](Service::GSP::InterruptId interrupt_id, u64 wait_delay_ns) {
-        gsp->SignalInterrupt(interrupt_id, wait_delay_ns);
-    });
+    gpu->SetInterruptHandler(
+        [gsp](Service::GSP::InterruptId interrupt_id, u64 wait_delay_ns, u64 elapsed_ns) {
+            gsp->SignalInterrupt(interrupt_id, wait_delay_ns, elapsed_ns);
+        });
 
     auto plg_ldr = Service::PLGLDR::GetService(*this);
     if (plg_ldr) {
@@ -935,9 +939,10 @@ void System::serialize(Archive& ar, const unsigned int file_version) {
         // Re-register gpu callback, because gsp service changed after service_manager got
         // serialized
         auto gsp = service_manager->GetService<Service::GSP::GSP_GPU>("gsp::Gpu");
-        gpu->SetInterruptHandler([gsp](Service::GSP::InterruptId interrupt_id, u64 wait_delay_ns) {
-            gsp->SignalInterrupt(interrupt_id, wait_delay_ns);
-        });
+        gpu->SetInterruptHandler(
+            [gsp](Service::GSP::InterruptId interrupt_id, u64 wait_delay_ns, u64 elapsed_ns) {
+                gsp->SignalInterrupt(interrupt_id, wait_delay_ns, elapsed_ns);
+            });
 
         // Apply per program settings and switch the shader cache to the title running when the
         // savestate was created.

@@ -93,6 +93,8 @@ void LogSettings() {
     log_setting("Controller_UseArticController", values.use_artic_base_controller.GetValue());
     log_setting("Renderer_UseGLES", values.use_gles.GetValue());
     log_setting("Renderer_GraphicsAPI", GetGraphicsAPIName(values.graphics_api.GetValue()));
+    log_setting("Renderer_AsyncGPU", values.async_gpu_emulation.GetValue());
+    log_setting("Renderer_StrictGPUSync", values.strict_gpu_sync.GetValue());
     log_setting("Renderer_AsyncShaders", values.async_shader_compilation.GetValue());
     log_setting("Renderer_AsyncPresentation", values.async_presentation.GetValue());
     log_setting("Renderer_SpirvShaderGen", values.spirv_shader_gen.GetValue());
@@ -215,6 +217,8 @@ void RestoreGlobalState(bool is_powered_on) {
     values.graphics_api.SetGlobal(true);
     values.physical_device.SetGlobal(true);
     values.spirv_shader_gen.SetGlobal(true);
+    values.async_gpu_emulation.SetGlobal(true);
+    values.strict_gpu_sync.SetGlobal(true);
     values.async_shader_compilation.SetGlobal(true);
     values.async_presentation.SetGlobal(true);
     values.use_hw_shader.SetGlobal(true);

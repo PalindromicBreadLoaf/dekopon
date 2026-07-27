@@ -395,20 +395,47 @@ bool Source::DequeueBuffer() {
 
     // This physical address masking occurs due to how the DSP DMA hardware is configured by the
     // firmware.
-    const u8* const memory = memory_system->GetPhysicalPointer(buf.physical_address & 0xFFFFFFFC);
+    const MemoryRef memory =
+        memory_system->GetPhysicalRef(buf.physical_address & 0xFFFFFFFC);
     if (memory) {
         const unsigned num_channels = buf.mono_or_stereo == MonoOrStereo::Stereo ? 2 : 1;
+        u64 encoded_size{};
         switch (buf.format) {
         case Format::PCM8:
-            state.current_buffer = Codec::DecodePCM8(num_channels, memory, buf.length);
+            encoded_size = static_cast<u64>(buf.length) * num_channels;
             break;
         case Format::PCM16:
-            state.current_buffer = Codec::DecodePCM16(num_channels, memory, buf.length);
+            encoded_size = static_cast<u64>(buf.length) * num_channels * sizeof(s16);
+            break;
+        case Format::ADPCM:
+            // GC-ADPCM stores fourteen samples in each eight-byte frame.
+            encoded_size = ((static_cast<u64>(buf.length) + 13) / 14) * 8;
+            break;
+        default:
+            break;
+        }
+        if (encoded_size > memory.GetSize()) {
+            LOG_ERROR(Audio_DSP,
+                      "source_id={} buffer_id={} length={}: Buffer at {:#010x} requires {} "
+                      "encoded bytes, but only {} remain in physical memory",
+                      source_id, buf.buffer_id, buf.length, buf.physical_address, encoded_size,
+                      memory.GetSize());
+            state.current_buffer.clear();
+            return true;
+        }
+
+        const u8* const data = memory.GetPtr();
+        switch (buf.format) {
+        case Format::PCM8:
+            state.current_buffer = Codec::DecodePCM8(num_channels, data, buf.length);
+            break;
+        case Format::PCM16:
+            state.current_buffer = Codec::DecodePCM16(num_channels, data, buf.length);
             break;
         case Format::ADPCM:
             DEBUG_ASSERT(num_channels == 1);
             state.current_buffer =
-                Codec::DecodeADPCM(memory, buf.length, state.adpcm_coeffs, state.adpcm_state);
+                Codec::DecodeADPCM(data, buf.length, state.adpcm_coeffs, state.adpcm_state);
             break;
         default:
             UNIMPLEMENTED();

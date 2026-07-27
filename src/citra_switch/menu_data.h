@@ -82,6 +82,8 @@ struct DirEntry {
 struct MenuSettings {
     int resolution_factor{};      // 0 = auto (window), 1 = native, 2... = upscale factor.
     bool use_vsync{};
+    bool async_gpu_emulation{};
+    bool strict_gpu_sync{};
     bool async_shader_compilation{};
     bool use_disk_shader_cache{};
     bool use_hw_shader{};         // Off falls the whole pipeline back to the CPU shader engine.

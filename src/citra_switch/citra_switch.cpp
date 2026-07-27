@@ -203,7 +203,8 @@ void RunGame(PadState& pad, const std::string& rom) {
             if (!SwitchFrontend::IsRunning()) {
                 break;
             }
-            svcSleepThread(1'000'000);
+            // The async GPU thread shares core 0 with this loop.
+            svcSleepThread(4'000'000);
         }
         SwitchFrontend::StopRom();
         if (SwitchFrontend::LoadFailed()) {

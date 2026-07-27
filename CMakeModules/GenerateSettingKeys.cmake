@@ -36,6 +36,8 @@ foreach(KEY IN ITEMS
     "dump_command_buffers"
     "spirv_shader_gen"
     "disable_spirv_optimizer"
+    "async_gpu_emulation"
+    "strict_gpu_sync"
     "async_shader_compilation"
     "async_presentation"
     "use_hw_shader"

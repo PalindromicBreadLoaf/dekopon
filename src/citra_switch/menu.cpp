@@ -578,6 +578,8 @@ std::string LayoutCycleSummary(std::uint32_t mask) {
 enum SettingRowIdx {
     SettingRowResolution,
     SettingRowVSync,
+    SettingRowAsyncGpu,
+    SettingRowStrictGpuSync,
     SettingRowAsyncShaders,
     SettingRowDiskShaderCache,
     SettingRowHwShader,
@@ -607,6 +609,8 @@ std::vector<SettingRow> BuildSettingRows(const MenuSettings& s) {
     return {
         {"Internal Resolution", ResolutionText(s.resolution_factor)},
         {"VSync", s.use_vsync ? "On" : "Off"},
+        {"Async GPU (restart)", s.async_gpu_emulation ? "On" : "Off"},
+        {"Strict GPU Sync", s.strict_gpu_sync ? "On" : "Off"},
         {"Async Shader Compilation", s.async_shader_compilation ? "On" : "Off"},
         {"Disk Shader Cache", s.use_disk_shader_cache ? "On" : "Off"},
         {"Hardware Shader", s.use_hw_shader ? "On" : "Off"},
@@ -644,6 +648,12 @@ void CycleSetting(MenuSettings& s, int idx, int dir) {
         break;
     case SettingRowVSync:
         s.use_vsync = dir > 0;
+        break;
+    case SettingRowAsyncGpu:
+        s.async_gpu_emulation = dir > 0;
+        break;
+    case SettingRowStrictGpuSync:
+        s.strict_gpu_sync = dir > 0;
         break;
     case SettingRowAsyncShaders:
         s.async_shader_compilation = dir > 0;

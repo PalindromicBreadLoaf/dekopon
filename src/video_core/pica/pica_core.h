@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include <span>
+
 #include "common/common_types.h"
 #include "core/hle/service/gsp/gsp_interrupt.h"
 #include "video_core/pica/dirty_regs.h"
@@ -119,6 +121,7 @@ public:
     void SetInterruptHandler(Service::GSP::InterruptHandler& signal_interrupt);
 
     void ProcessCmdList(PAddr list, u32 size, bool ignore_list);
+    void ProcessCmdList(PAddr list, std::span<const u8> commands, bool ignore_list);
 
 private:
     void InitializeRegs();
@@ -401,8 +404,12 @@ public:
     };
 
     RenderPropertiesGuess GuessCmdRenderProperties(PAddr list, u32 size);
+    RenderPropertiesGuess GuessCmdRenderProperties(PAddr list, std::span<const u8> commands);
 
 private:
+    void ProcessCmdList(PAddr list, const u8* commands, u32 size, bool ignore_list);
+    RenderPropertiesGuess GuessCmdRenderProperties(PAddr list, const u8* commands, u32 size);
+
     Memory::MemorySystem& memory;
     VideoCore::RasterizerInterface* rasterizer;
     std::shared_ptr<DebugContext> debug_context;

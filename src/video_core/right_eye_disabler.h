@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include <span>
+
 #include "common/common_types.h"
 
 namespace VideoCore {
@@ -14,6 +16,7 @@ public:
     RightEyeDisabler(GPU& gpu) : gpu{gpu} {}
 
     bool ShouldAllowCmdQueueTrigger(PAddr addr, u32 size);
+    bool ShouldAllowCmdQueueTrigger(PAddr addr, std::span<const u8> commands);
     bool ShouldAllowDisplayTransfer(PAddr src_address, size_t size);
 
     void ReportEndFrame();
