@@ -22,6 +22,25 @@ class Process;
 
 namespace Loader {
 
+/**
+ * Maps a raw exheader `system_mode` field onto Kernel::MemoryMode, or nullopt if it holds no
+ * named mode.
+ */
+constexpr std::optional<Kernel::MemoryMode> MemoryModeFromExheader(u8 system_mode) {
+    switch (static_cast<Kernel::MemoryMode>(system_mode)) {
+    case Kernel::MemoryMode::Prod:
+    case Kernel::MemoryMode::Dev1:
+    case Kernel::MemoryMode::Dev2:
+    case Kernel::MemoryMode::Dev3:
+    case Kernel::MemoryMode::Dev4:
+    case Kernel::MemoryMode::NewProd:
+    case Kernel::MemoryMode::NewDev1:
+        return static_cast<Kernel::MemoryMode>(system_mode);
+    default:
+        return std::nullopt;
+    }
+}
+
 /// File types supported by CTR
 enum class FileType {
     Error,

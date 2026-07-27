@@ -46,6 +46,25 @@ bool PinCurrentThreadPreferred(std::initializer_list<std::uint32_t> preferred) {
     return false;
 }
 
+bool PinCurrentThreadAffinity(std::int32_t preferred_core, std::uint64_t affinity_mask) {
+    u64 allowed_cores{};
+    if (R_FAILED(svcGetInfo(&allowed_cores, InfoType_CoreMask, CUR_PROCESS_HANDLE, 0))) {
+        return false;
+    }
+
+    const u64 mask = affinity_mask & allowed_cores;
+    if (mask == 0) {
+        return false;
+    }
+
+    if (preferred_core < 0 || preferred_core >= 64 ||
+        (mask & (1ULL << static_cast<u64>(preferred_core))) == 0) {
+        preferred_core = static_cast<std::int32_t>(__builtin_ctzll(mask));
+    }
+
+    return R_SUCCEEDED(svcSetThreadCoreMask(CUR_THREAD_HANDLE, preferred_core, mask));
+}
+
 bool PinAsyncGpuThread() {
     return PinCurrentThreadPreferred({0, 3});
 }
@@ -81,6 +100,10 @@ bool PinCurrentThread(std::uint32_t) {
 }
 
 bool PinCurrentThreadPreferred(std::initializer_list<std::uint32_t>) {
+    return false;
+}
+
+bool PinCurrentThreadAffinity(std::int32_t, std::uint64_t) {
     return false;
 }
 

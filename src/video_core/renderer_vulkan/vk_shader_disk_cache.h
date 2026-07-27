@@ -277,6 +277,10 @@ private:
 
         size_t GetTotalEntries();
 
+        /// Walks entries forward from the file header to find the last intact one, trimming
+        /// whatever follows. Called when the trailing footer doesn't check out.
+        size_t RecoverFromTornWrite();
+
         template <typename T>
         void Append(CacheEntryType type, u64 id, const T& object, bool compress) {
             static_assert(std::is_trivially_copyable_v<T>);

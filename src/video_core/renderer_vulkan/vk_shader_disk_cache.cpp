@@ -370,11 +370,51 @@ size_t ShaderDiskCache::CacheFile::GetTotalEntries() {
     if (file.ReadAtArray(&footer, 1, file_size - sizeof(footer)) == sizeof(footer) &&
         footer.version == CacheEntry::CacheEntryFooter::ENTRY_VERSION) {
         next_entry_id = footer.entry_id + 1;
-    } else {
-        file_size = 0;
-        return SIZE_MAX;
+        return next_entry_id;
     }
 
+    return RecoverFromTornWrite();
+}
+
+size_t ShaderDiskCache::CacheFile::RecoverFromTornWrite() {
+    CacheEntry::CacheEntryHeader info_header = ReadAtHeader(0);
+    if (!info_header.Valid() || info_header.Type() != CacheEntryType::FILE_INFO) {
+        next_entry_id = SIZE_MAX;
+        file_size = 0;
+        return next_entry_id;
+    }
+
+    size_t last_good_end = info_header.entry_size;
+    size_t last_good_id = 0;
+    size_t pos = last_good_end;
+
+    while (pos < file_size) {
+        CacheEntry::CacheEntryHeader entry_header = ReadAtHeader(pos);
+        if (!entry_header.Valid() || pos + entry_header.entry_size > file_size) {
+            break;
+        }
+
+        CacheEntry::CacheEntryFooter entry_footer{};
+        const size_t footer_pos = pos + entry_header.entry_size - sizeof(entry_footer);
+        if (file.ReadAtArray(&entry_footer, 1, footer_pos) != sizeof(entry_footer) ||
+            entry_footer.version != CacheEntry::CacheEntryFooter::ENTRY_VERSION) {
+            break;
+        }
+
+        last_good_id = entry_footer.entry_id;
+        pos += entry_header.entry_size;
+        last_good_end = pos;
+    }
+
+    if (last_good_end < file_size) {
+        LOG_WARNING(Render_Vulkan,
+                    "Disk shader cache '{}' ends in a torn entry, trimming {} "
+                    "bytes and keeping the {} entries before it",
+                    filepath, file_size - last_good_end, last_good_id + 1);
+    }
+
+    file_size = last_good_end;
+    next_entry_id = last_good_id + 1;
     return next_entry_id;
 }
 
@@ -463,7 +503,18 @@ bool ShaderDiskCache::CacheFile::SwitchMode(CacheOpMode mode) {
         }
 
         file = FileUtil::IOFile(filepath, "ab");
-        return file.IsGood();
+        if (!file.IsGood()) {
+            return false;
+        }
+        // RecoverFromTornWrite() may have shortened file_size past a damaged tail. Drop that tail
+        // for real before appending, or the next entry lands after it and the file stays broken.
+        if (file.GetSize() != file_size && !file.Resize(file_size)) {
+            LOG_WARNING(Render_Vulkan,
+                        "Could not trim torn tail from disk shader cache '{}', it will be read "
+                        "but not extended this session",
+                        filepath);
+        }
+        return true;
     }
     case CacheOpMode::DELETE: {
         next_entry_id = SIZE_MAX;

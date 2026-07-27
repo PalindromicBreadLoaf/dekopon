@@ -103,7 +103,12 @@ std::pair<std::optional<Kernel::MemoryMode>, ResultStatus> AppLoader_NCCH::LoadK
 
     // Provide the memory mode from the exheader.
     auto& ncch_caps = overlay_ncch->exheader_header.arm11_system_local_caps;
-    auto mode = static_cast<Kernel::MemoryMode>(ncch_caps.system_mode.Value());
+    const u8 system_mode = static_cast<u8>(ncch_caps.system_mode.Value());
+    const auto mode = MemoryModeFromExheader(system_mode);
+    if (!mode) {
+        LOG_ERROR(Loader, "Invalid exheader system_mode {}, ROM is likely corrupt", system_mode);
+        return std::make_pair(std::nullopt, ResultStatus::ErrorInvalidFormat);
+    }
     return std::make_pair(mode, ResultStatus::Success);
 }
 
