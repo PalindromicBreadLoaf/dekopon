@@ -544,6 +544,11 @@ public:
     }
 
     void RasterizerFlushVirtualRegion(VAddr start, u32 size, FlushMode mode) {
+        auto* gpu = system.GPUPtr();
+        if (!gpu) {
+            return;
+        }
+
         const VAddr end = start + size;
 
         auto CheckRegion = [&](VAddr region_start, VAddr region_end, PAddr paddr_region_start) {
@@ -557,16 +562,15 @@ public:
             PAddr physical_start = paddr_region_start + (overlap_start - region_start);
             u32 overlap_size = overlap_end - overlap_start;
 
-            auto& gpu = system.GPU();
             switch (mode) {
             case FlushMode::Flush:
-                gpu.FlushRegion(physical_start, overlap_size);
+                gpu->FlushRegion(physical_start, overlap_size);
                 break;
             case FlushMode::Invalidate:
-                gpu.InvalidateRegion(physical_start, overlap_size);
+                gpu->InvalidateRegion(physical_start, overlap_size);
                 break;
             case FlushMode::FlushAndInvalidate:
-                gpu.FlushAndInvalidateRegion(physical_start, overlap_size);
+                gpu->FlushAndInvalidateRegion(physical_start, overlap_size);
                 break;
             }
         };
@@ -1255,8 +1259,10 @@ void MemorySystem::RasterizerMarkRegionCached(PAddr start, u32 size, bool cached
         return;
     }
 
-    if (impl->system.GPU().IsOnAsyncGPUThread()) {
-        impl->system.GPU().QueuePageTableUpdate(start, size, cached);
+    // The rasterizer cache unmarks its pages from inside ~GPU, by which point System::gpu is
+    // already null, so a missing GPU just means the update runs inline here.
+    if (auto* gpu = impl->system.GPUPtr(); gpu && gpu->IsOnAsyncGPUThread()) {
+        gpu->QueuePageTableUpdate(start, size, cached);
         return;
     }
 

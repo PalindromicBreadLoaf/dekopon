@@ -237,6 +237,12 @@ public:
 
     [[nodiscard]] VideoCore::GPU& GPU();
 
+    /// Null before the GPU exists and for the whole of its destruction, so anything the GPU can
+    /// reach on the way down has to ask for it this way rather than through GPU().
+    [[nodiscard]] VideoCore::GPU* GPUPtr() {
+        return gpu.get();
+    }
+
     /**
      * Gets a reference to the service manager.
      * @returns A reference to the service manager.
