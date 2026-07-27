@@ -90,6 +90,7 @@ struct MenuSettings {
     int texture_filter{};         // Upscaling filter, 0 = None .. 5 = MMPX.
     bool filter_mode{};           // Linear (on) or nearest-neighbour (off) screen sampling.
     bool use_integer_scaling{};   // Scale the screen by whole-number factors only.
+    bool stretch_fullscreen{};    // Fill the display in either single-screen layout.
     bool show_fps{};              // On-screen framerate counter.
     bool show_shader_compile_notice{};
     bool disable_right_eye_render{};

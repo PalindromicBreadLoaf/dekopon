@@ -149,6 +149,8 @@ private:
         ReadSetting("Renderer", Settings::values.disable_right_eye_render);
 
         // Layout
+        SwitchFrontend::SetFullscreenStretchEnabled(
+            config->GetBoolean("Layout", "stretch_fullscreen", false));
         ReadSetting("Layout", Settings::values.screen_gap);
         ReadSetting("Layout", Settings::values.overlay_screen_position);
         ReadSetting("Layout", Settings::values.overlay_screen_size);
@@ -240,6 +242,8 @@ private:
            << (v.disable_right_eye_render.GetValue() ? "true" : "false") << "\n\n";
 
         ss << "[Layout]\n";
+        ss << "stretch_fullscreen = "
+           << (SwitchFrontend::IsFullscreenStretchEnabled() ? "true" : "false") << '\n';
         ss << "screen_gap = " << v.screen_gap.GetValue() << '\n';
         ss << "overlay_screen_position = "
            << static_cast<int>(v.overlay_screen_position.GetValue()) << '\n';

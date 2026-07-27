@@ -586,6 +586,7 @@ enum SettingRowIdx {
     SettingRowTextureFilter,
     SettingRowLinearFiltering,
     SettingRowIntegerScaling,
+    SettingRowStretchFullscreen,
     SettingRowShowFps,
     SettingRowShowShaderCompileNotice,
     SettingRowDisableRightEye,
@@ -617,6 +618,7 @@ std::vector<SettingRow> BuildSettingRows(const MenuSettings& s) {
         {"Texture Filter", TextureFilterName(s.texture_filter)},
         {"Linear Filtering", s.filter_mode ? "On" : "Off"},
         {"Integer Scaling", s.use_integer_scaling ? "On" : "Off"},
+        {"Stretch Fullscreen", s.stretch_fullscreen ? "On" : "Off"},
         {"Show FPS Counter", s.show_fps ? "On" : "Off"},
         {"Shader Compile Notice", s.show_shader_compile_notice ? "On" : "Off"},
         {"Disable Right Eye Render", s.disable_right_eye_render ? "On" : "Off"},
@@ -672,6 +674,9 @@ void CycleSetting(MenuSettings& s, int idx, int dir) {
         break;
     case SettingRowIntegerScaling:
         s.use_integer_scaling = dir > 0;
+        break;
+    case SettingRowStretchFullscreen:
+        s.stretch_fullscreen = dir > 0;
         break;
     case SettingRowShowFps:
         s.show_fps = dir > 0;

@@ -475,6 +475,7 @@ MenuSettings GetMenuSettings() {
         .texture_filter = static_cast<int>(v.texture_filter.GetValue()),
         .filter_mode = v.filter_mode.GetValue(),
         .use_integer_scaling = v.use_integer_scaling.GetValue(),
+        .stretch_fullscreen = IsFullscreenStretchEnabled(),
         .show_fps = v.show_fps.GetValue(),
         .show_shader_compile_notice = v.show_shader_compile_notice.GetValue(),
         .disable_right_eye_render = v.disable_right_eye_render.GetValue(),
@@ -507,6 +508,7 @@ void SetMenuSettings(const MenuSettings& s) {
     v.texture_filter = static_cast<Settings::TextureFilter>(std::clamp(s.texture_filter, 0, 5));
     v.filter_mode = s.filter_mode;
     v.use_integer_scaling = s.use_integer_scaling;
+    SetFullscreenStretchEnabled(s.stretch_fullscreen);
     v.show_fps = s.show_fps;
     v.show_shader_compile_notice = s.show_shader_compile_notice;
     v.disable_right_eye_render = s.disable_right_eye_render;

@@ -32,6 +32,7 @@ enum class Item {
     OverlayPosition,
     OverlaySize,
     OverlayOpacity,
+    StretchFullscreen,
     FpsCounter,
     ShaderCompileNotice,
     CustomTextures,
@@ -176,6 +177,7 @@ void RebuildRows() {
             s_rows.push_back({Item::OverlaySize});
             s_rows.push_back({Item::OverlayOpacity});
         }
+        s_rows.push_back({Item::StretchFullscreen});
         s_rows.push_back({Item::FpsCounter});
         s_rows.push_back({Item::ShaderCompileNotice});
         s_rows.push_back({Item::CustomTextures});
@@ -240,6 +242,8 @@ std::string Label(const Row& row) {
         return "Overlay Size";
     case Item::OverlayOpacity:
         return "Overlay Opacity";
+    case Item::StretchFullscreen:
+        return "Stretch Fullscreen";
     case Item::GyroSensitivityX:
         return "Gyro Sens. X";
     case Item::GyroSensitivityY:
@@ -284,6 +288,8 @@ std::string Value(const Row& row) {
         return std::to_string(GetOverlayScreenSize()) + "%";
     case Item::OverlayOpacity:
         return std::to_string(GetOverlayScreenOpacity()) + "%";
+    case Item::StretchFullscreen:
+        return IsFullscreenStretchEnabled() ? "On" : "Off";
     case Item::GyroSensitivityX:
         return std::to_string(GetGyroSensitivityX()) + "%";
     case Item::GyroSensitivityY:
@@ -328,6 +334,9 @@ void Adjust(const Row& row, int dir) {
         break;
     case Item::OverlayOpacity:
         StepOverlayScreenOpacity(dir);
+        break;
+    case Item::StretchFullscreen:
+        SetFullscreenStretchEnabled(dir > 0);
         break;
     case Item::GyroSensitivityX:
         SetGyroSensitivity(GetGyroSensitivityX() + dir * kGyroStep, GetGyroSensitivityY());
@@ -394,6 +403,9 @@ void Activate(const Row& row) {
     case Item::DisableRightEyeRender:
         Settings::values.disable_right_eye_render =
             !Settings::values.disable_right_eye_render.GetValue();
+        break;
+    case Item::StretchFullscreen:
+        SetFullscreenStretchEnabled(!IsFullscreenStretchEnabled());
         break;
     case Item::PauseInMenu:
         SetPauseInQuickMenu(!IsPauseInQuickMenu());

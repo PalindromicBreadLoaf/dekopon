@@ -68,6 +68,10 @@ void StepScreenLayout(int delta);
 // Swaps which 3DS screen occupies which slot of the current arrangement.
 void ToggleSwapScreens();
 
+// Stretches either single-screen layout to fill the entire display.
+bool IsFullscreenStretchEnabled();
+void SetFullscreenStretchEnabled(bool enabled);
+
 // True while the layout draws one screen as an overlay on top of the other.
 bool IsOverlayScreenLayout();
 

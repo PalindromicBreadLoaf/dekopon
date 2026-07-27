@@ -409,6 +409,19 @@ void ToggleSwapScreens() {
     s_layout_update_pending.store(true, std::memory_order_release);
 }
 
+bool IsFullscreenStretchEnabled() {
+    return Settings::values.screen_top_stretch.GetValue() &&
+           Settings::values.screen_bottom_stretch.GetValue();
+}
+
+void SetFullscreenStretchEnabled(bool enabled) {
+    Settings::values.screen_top_stretch = enabled;
+    Settings::values.screen_bottom_stretch = enabled;
+    if (Core::System::GetInstance().IsPoweredOn()) {
+        s_layout_update_pending.store(true, std::memory_order_release);
+    }
+}
+
 const char* CurrentScreenLayoutName() {
     return s_layout_presets[s_layout_index].name;
 }

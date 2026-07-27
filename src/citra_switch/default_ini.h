@@ -59,6 +59,8 @@ use_shader_jit =
 disable_right_eye_render = false
 
 [Layout]
+# Stretch top-only and bottom-only layouts to fill the entire display (0, default).
+stretch_fullscreen = false
 # Where the small screen sits inside the big one in the "Bottom screen overlay" layout.
 # 0: top right, 1: middle right, 2: bottom right (default), 3: top left, 4: middle left,
 # 5: bottom left, 6: top centre, 7: bottom centre.
