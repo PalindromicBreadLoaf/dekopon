@@ -8,8 +8,10 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <ctime>
 #include <string>
 #include <thread>
+#include <fmt/format.h>
 
 #include "citra_switch/applets/swkbd.h"
 #include "citra_switch/config.h"
@@ -22,7 +24,10 @@
 #include "core/core.h"
 #include "core/frontend/applets/default_applets.h"
 #include "core/loader/loader.h"
+#include "core/movie.h"
+#include "core/savestate.h"
 #include "video_core/gpu.h"
+#include "video_core/overlay.h"
 #include "video_core/rasterizer_interface.h"
 #include "video_core/renderer_base.h"
 
@@ -124,6 +129,35 @@ void SyncLayoutIndex() {
     }
 }
 
+// Save states are keyed by the running title and, when replaying, the active movie.
+bool CurrentSaveStateKey(u64& program_id, u64& movie_id) {
+    auto& system = Core::System::GetInstance();
+    if (!system.IsPoweredOn()) {
+        return false;
+    }
+    program_id = 0;
+    if (system.GetAppLoader().ReadProgramId(program_id) != Loader::ResultStatus::Success) {
+        return false;
+    }
+    movie_id = system.Movie().GetCurrentMovieID();
+    return true;
+}
+
+// Turns a completed save state request into an on-screen message.
+void ReportSaveStateEvent(Core::System& system) {
+    const auto event = system.TakeSaveStateEvent();
+    if (!event) {
+        return;
+    }
+    const char* verb = event->loading ? "Load" : "Save";
+    if (event->success) {
+        VideoCore::PostOverlayToast(
+            fmt::format("{}d state {}", verb, SaveStateSlotName(event->slot)));
+    } else {
+        VideoCore::PostOverlayToast(fmt::format("{} failed: {}", verb, event->message), 4000);
+    }
+}
+
 /// Returns true if `path` is a 3DS title.
 bool IsLoadableRom(const std::string& path) {
     auto loader = Loader::GetLoader(path);
@@ -215,7 +249,13 @@ void EmuThread(std::string path) {
         }
 
         const Core::System::ResultStatus result = system.RunLoop();
+        ReportSaveStateEvent(system);
         if (result == Core::System::ResultStatus::Success) {
+            continue;
+        }
+        // A rejected save or load leaves the guest untouched, so keep running.
+        if (result == Core::System::ResultStatus::ErrorSavestate) {
+            LOG_ERROR(Frontend, "Save state operation failed: {}", system.GetStatusDetails());
             continue;
         }
         if (result == Core::System::ResultStatus::ShutdownRequested) {
@@ -444,6 +484,62 @@ std::uint32_t GetLayoutCycleMask() {
 void SetLayoutCycleMask(std::uint32_t mask) {
     const std::uint32_t all = (1u << s_layout_presets.size()) - 1;
     s_layout_cycle_mask.store(mask & all, std::memory_order_relaxed);
+}
+
+std::string SaveStateSlotName(unsigned int slot) {
+    return slot == 0 ? "Quick" : fmt::format("Slot {}", slot);
+}
+
+std::string SaveStateSlotStatus(unsigned int slot) {
+    u64 program_id = 0;
+    u64 movie_id = 0;
+    if (!CurrentSaveStateKey(program_id, movie_id)) {
+        return {};
+    }
+
+    for (const auto& info : Core::ListSaveStates(program_id, movie_id)) {
+        if (info.slot != slot) {
+            continue;
+        }
+        const auto time = static_cast<std::time_t>(info.time);
+        std::tm tm{};
+        if (localtime_r(&time, &tm) == nullptr) {
+            return "Used";
+        }
+        std::string status = fmt::format("{:02}/{:02} {:02}:{:02}", tm.tm_mday, tm.tm_mon + 1,
+                                         tm.tm_hour, tm.tm_min);
+        if (info.status == Core::SaveStateInfo::ValidationStatus::RevisionDismatch) {
+            status += " (old)";
+        }
+        return status;
+    }
+    return {};
+}
+
+bool RequestSaveState(unsigned int slot) {
+    auto& system = Core::System::GetInstance();
+    if (!system.IsPoweredOn() || slot >= Core::SaveStateSlotCount) {
+        return false;
+    }
+    return system.SendSignal(Core::System::Signal::Save, slot);
+}
+
+bool RequestLoadState(unsigned int slot) {
+    auto& system = Core::System::GetInstance();
+    if (!system.IsPoweredOn() || slot >= Core::SaveStateSlotCount) {
+        return false;
+    }
+    return system.SendSignal(Core::System::Signal::Load, slot);
+}
+
+bool DeleteSaveState(unsigned int slot) {
+    u64 program_id = 0;
+    u64 movie_id = 0;
+    if (!CurrentSaveStateKey(program_id, movie_id) || slot >= Core::SaveStateSlotCount) {
+        return false;
+    }
+    const std::string path = Core::GetSaveStatePath(program_id, movie_id, slot);
+    return FileUtil::Exists(path) && FileUtil::Delete(path);
 }
 
 bool LoadFailed() {

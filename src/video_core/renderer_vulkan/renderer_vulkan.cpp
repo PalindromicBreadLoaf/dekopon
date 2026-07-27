@@ -1400,6 +1400,7 @@ void RendererVulkan::DrawScreens(Frame* frame, const Layout::FramebufferLayout& 
     renderpass_cache.EndRendering();
     OverlayDraw fps_overlay = PrepareFpsOverlay(layout);
     OverlayDraw shader_notice = PrepareShaderNotice(layout);
+    OverlayDraw toast = PrepareToast(layout);
     OverlayDraw quick_menu = PrepareQuickMenu(layout);
 
     PrepareDraw(frame, layout);
@@ -1442,6 +1443,7 @@ void RendererVulkan::DrawScreens(Frame* frame, const Layout::FramebufferLayout& 
 
     RecordOverlay(std::move(fps_overlay));
     RecordOverlay(std::move(shader_notice));
+    RecordOverlay(std::move(toast));
     RecordOverlay(std::move(quick_menu));
 
     scheduler.Record([](vk::CommandBuffer cmdbuf) { cmdbuf.endRenderPass(); });
@@ -1707,6 +1709,67 @@ RendererVulkan::OverlayDraw RendererVulkan::PrepareShaderNotice(
 
     constexpr std::array<float, 4> box_color = {0.0f, 0.0f, 0.0f, 0.55f};
     constexpr std::array<float, 4> text_color = {1.0f, 0.82f, 0.35f, 1.0f};
+
+    OverlayDraw overlay;
+    overlay.base_vertex = static_cast<u32>(offset) / (sizeof(float) * 4);
+    overlay.batches.push_back({box_color, 0, box_vertices});
+    if (glyph_vertices > 0) {
+        overlay.batches.push_back({text_color, box_vertices, glyph_vertices});
+    }
+    return overlay;
+}
+
+RendererVulkan::OverlayDraw RendererVulkan::PrepareToast(const Layout::FramebufferLayout& layout) {
+    const std::string text = VideoCore::GetOverlayToast();
+    if (text.empty()) {
+        return {};
+    }
+
+    const float w = static_cast<float>(layout.width);
+    const float h = static_cast<float>(layout.height);
+    if (w <= 0.0f || h <= 0.0f) {
+        return {};
+    }
+
+    const float em = std::max(16.0f, std::round(h / 28.0f));
+    const float scale = em / OverlayFont::kBakePixelHeight;
+    const float margin = std::round(em * 1.2f);
+    const float pad = std::round(em * 0.45f);
+
+    float ink_top = OverlayFont::kAscent;
+    float ink_bottom = 0.0f;
+    for (const char c : text) {
+        const OverlayFont::Glyph& g = OverlayFont::GlyphFor(c);
+        if (g.h > 0.0f) {
+            ink_top = std::min(ink_top, g.yoff);
+            ink_bottom = std::max(ink_bottom, g.yoff + g.h);
+        }
+    }
+
+    std::vector<float> verts;
+    verts.reserve(512);
+    OverlayBuilder builder{verts, w, h};
+
+    const float text_w = OverlayBuilder::Measure(text, scale);
+
+    // Bottom centre, above the shader notice's row.
+    const float ox = std::round((w - text_w) / 2.0f);
+    const float oy = h - margin - pad - ink_bottom * scale;
+
+    builder.AddRect(ox - pad, oy + ink_top * scale - pad, ox + text_w + pad,
+                    oy + ink_bottom * scale + pad);
+    const u32 box_vertices = builder.VertexCount();
+
+    builder.AddText(ox, oy, text, scale);
+    const u32 glyph_vertices = builder.VertexCount() - box_vertices;
+
+    const u64 size = verts.size() * sizeof(float);
+    auto [data, offset, invalidate] = overlay_vertex_buffer.Map(size, 16);
+    std::memcpy(data, verts.data(), size);
+    overlay_vertex_buffer.Commit(size);
+
+    constexpr std::array<float, 4> box_color = {0.05f, 0.06f, 0.08f, 0.85f};
+    constexpr std::array<float, 4> text_color = {1.0f, 1.0f, 1.0f, 1.0f};
 
     OverlayDraw overlay;
     overlay.base_vertex = static_cast<u32>(offset) / (sizeof(float) * 4);

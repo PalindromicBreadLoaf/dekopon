@@ -17,6 +17,7 @@
 #include "core/core.h"
 #include "core/core_timing.h"
 #include "core/loader/loader.h"
+#include "core/savestate.h"
 #include "video_core/overlay.h"
 
 namespace SwitchFrontend {
@@ -45,6 +46,7 @@ enum class Item {
     PauseInMenu,
     Cheat,
     CheatsEmpty,
+    SaveStateSlot,
     Resume,
     ExitGame,
 };
@@ -52,6 +54,7 @@ enum class Item {
 struct Row {
     Item item;
     int cheat_index = -1;
+    int slot = -1;
 };
 
 // The overlay is split into pages with L/R used to cycle between them.
@@ -59,10 +62,12 @@ enum class Page {
     Display,
     Input,
     System,
+    States,
     Cheats,
 };
 
-constexpr std::array<Page, 4> kPages = {Page::Display, Page::Input, Page::System, Page::Cheats};
+constexpr std::array<Page, 5> kPages = {Page::Display, Page::Input, Page::System, Page::States,
+                                        Page::Cheats};
 
 const char* PageName(Page page) {
     switch (page) {
@@ -72,6 +77,8 @@ const char* PageName(Page page) {
         return "Input";
     case Page::System:
         return "System";
+    case Page::States:
+        return "States";
     case Page::Cheats:
         return "Cheats";
     }
@@ -89,13 +96,31 @@ constexpr int kClockMax = 400;
 // Cheats past this many spill onto further sub-pages.
 constexpr int kCheatsPerPage = 8;
 
+// Save state slots past this many spill onto further sub-pages.
+constexpr int kSlotsPerPage = 8;
+
 std::atomic<bool> s_open{false};
 std::atomic<bool> s_pause_in_menu{false};
 int s_page = 0;
 int s_selected = 0;
 int s_cheat_page = 0;
+int s_state_page = 0;
 std::vector<Row> s_rows;
 bool s_cheats_dirty = false;
+
+// Slot status strings.
+// Refreshed on demand so repaints don't stat the state directory.
+std::array<std::string, Core::SaveStateSlotCount> s_slot_status;
+
+void RefreshSaveStates() {
+    for (u32 slot = 0; slot < Core::SaveStateSlotCount; ++slot) {
+        s_slot_status[slot] = SaveStateSlotStatus(slot);
+    }
+}
+
+int StatePageCount() {
+    return (static_cast<int>(Core::SaveStateSlotCount) + kSlotsPerPage - 1) / kSlotsPerPage;
+}
 
 Page CurrentPage() {
     return kPages[static_cast<std::size_t>(s_page)];
@@ -195,6 +220,16 @@ void RebuildRows() {
         s_rows.push_back({Item::Resume});
         s_rows.push_back({Item::ExitGame});
         break;
+    case Page::States: {
+        s_state_page = std::clamp(s_state_page, 0, StatePageCount() - 1);
+        const int first = s_state_page * kSlotsPerPage;
+        const int last =
+            std::min(static_cast<int>(Core::SaveStateSlotCount), first + kSlotsPerPage);
+        for (int slot = first; slot < last; ++slot) {
+            s_rows.push_back({Item::SaveStateSlot, -1, slot});
+        }
+        break;
+    }
     case Page::Cheats: {
         const int count = CheatCount();
         s_cheat_page = std::clamp(s_cheat_page, 0, CheatPageCount() - 1);
@@ -225,7 +260,8 @@ void SetCpuClock(int percent) {
 
 bool IsAction(const Row& row) {
     return row.item == Item::SwapScreens || row.item == Item::Resume ||
-           row.item == Item::ExitGame || row.item == Item::CheatsEmpty;
+           row.item == Item::ExitGame || row.item == Item::CheatsEmpty ||
+           row.item == Item::SaveStateSlot;
 }
 
 std::string Label(const Row& row) {
@@ -268,6 +304,8 @@ std::string Label(const Row& row) {
         return CheatName(row.cheat_index);
     case Item::CheatsEmpty:
         return "No cheats loaded";
+    case Item::SaveStateSlot:
+        return SaveStateSlotName(static_cast<unsigned int>(row.slot));
     case Item::Resume:
         return "Resume Game";
     case Item::ExitGame:
@@ -312,6 +350,10 @@ std::string Value(const Row& row) {
         return IsPauseInQuickMenu() ? "On" : "Off";
     case Item::Cheat:
         return CheatEnabled(row.cheat_index) ? "On" : "Off";
+    case Item::SaveStateSlot: {
+        const std::string& status = s_slot_status[static_cast<std::size_t>(row.slot)];
+        return status.empty() ? "Empty" : status;
+    }
     default:
         return "";
     }
@@ -434,6 +476,13 @@ void Repaint() {
         } else {
             state.hint = "A Toggle   L/R Page   +/- Close";
         }
+    } else if (CurrentPage() == Page::States) {
+        const int state_pages = StatePageCount();
+        if (state_pages > 1) {
+            state.title +=
+                "  List " + std::to_string(s_state_page + 1) + "/" + std::to_string(state_pages);
+        }
+        state.hint = "A Load   X Save   Y Delete   ZL/ZR List   L/R Page";
     } else {
         state.hint = "A Change   L/R Page   +/- Close";
     }
@@ -465,6 +514,8 @@ void OpenQuickMenu() {
     s_page = 0;
     s_selected = 0;
     s_cheat_page = 0;
+    s_state_page = 0;
+    RefreshSaveStates();
     RebuildRows();
     s_open.store(true, std::memory_order_relaxed);
     if (IsPauseInQuickMenu()) {
@@ -511,6 +562,9 @@ QuickMenuAction UpdateQuickMenu(const QuickMenuNav& nav) {
         const int count = static_cast<int>(kPages.size());
         s_page = (s_page + (nav.tab_next ? 1 : -1) + count) % count;
         s_selected = 0;
+        if (CurrentPage() == Page::States) {
+            RefreshSaveStates();
+        }
         RebuildRows();
         changed = true;
     }
@@ -520,6 +574,16 @@ QuickMenuAction UpdateQuickMenu(const QuickMenuNav& nav) {
         const int pages = CheatPageCount();
         const int dir = nav.page_next ? 1 : -1;
         s_cheat_page = (s_cheat_page + dir + pages) % pages;
+        s_selected = 0;
+        RebuildRows();
+        changed = true;
+    }
+
+    // ZL/ZR page through the save state slots.
+    if (CurrentPage() == Page::States && (nav.page_prev || nav.page_next)) {
+        const int pages = StatePageCount();
+        const int dir = nav.page_next ? 1 : -1;
+        s_state_page = (s_state_page + dir + pages) % pages;
         s_selected = 0;
         RebuildRows();
         changed = true;
@@ -544,6 +608,34 @@ QuickMenuAction UpdateQuickMenu(const QuickMenuNav& nav) {
         Adjust(row, 1);
         changed = true;
     }
+    // A loads, X saves, Y deletes. Save and load are queued for the emulation thread, which only
+    // reaches them once the menu lets the guest run again, so close on the way out.
+    if (row.item == Item::SaveStateSlot && (nav.confirm || nav.alt || nav.alt2)) {
+        const auto slot = static_cast<unsigned int>(row.slot);
+        const bool occupied = !s_slot_status[slot].empty();
+        if (nav.alt) {
+            if (RequestSaveState(slot)) {
+                CloseQuickMenu();
+                return QuickMenuAction::Close;
+            }
+        } else if (nav.confirm) {
+            if (!occupied) {
+                VideoCore::PostOverlayToast(SaveStateSlotName(slot) + " is empty");
+            } else if (RequestLoadState(slot)) {
+                CloseQuickMenu();
+                return QuickMenuAction::Close;
+            }
+        } else if (occupied) {
+            if (DeleteSaveState(slot)) {
+                VideoCore::PostOverlayToast("Deleted " + SaveStateSlotName(slot));
+            }
+            RefreshSaveStates();
+        }
+        RebuildRows();
+        Repaint();
+        return QuickMenuAction::None;
+    }
+
     if (nav.confirm) {
         if (row.item == Item::Resume) {
             CloseQuickMenu();

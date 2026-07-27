@@ -135,6 +135,8 @@ private:
 
     OverlayDraw PrepareShaderNotice(const Layout::FramebufferLayout& layout);
 
+    OverlayDraw PrepareToast(const Layout::FramebufferLayout& layout);
+
     OverlayDraw PrepareQuickMenu(const Layout::FramebufferLayout& layout);
 
     void RecordOverlay(OverlayDraw overlay);

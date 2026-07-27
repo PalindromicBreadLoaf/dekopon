@@ -22,6 +22,8 @@ struct QuickMenuNav {
     bool right{};
     bool confirm{};   // A
     bool cancel{};    // B
+    bool alt{};       // X
+    bool alt2{};      // Y
     bool tab_prev{};  // L
     bool tab_next{};  // R
     bool page_prev{}; // ZL

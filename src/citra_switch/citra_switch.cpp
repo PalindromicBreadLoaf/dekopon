@@ -171,6 +171,8 @@ void RunGame(PadState& pad, const std::string& rom) {
                     .right = (pressed & (HidNpadButton_Right | HidNpadButton_StickLRight)) != 0,
                     .confirm = (pressed & HidNpadButton_A) != 0,
                     .cancel = (pressed & HidNpadButton_B) != 0,
+                    .alt = (pressed & HidNpadButton_X) != 0,
+                    .alt2 = (pressed & HidNpadButton_Y) != 0,
                     .tab_prev = (pressed & HidNpadButton_L) != 0,
                     .tab_next = (pressed & HidNpadButton_R) != 0,
                     .page_prev = (pressed & HidNpadButton_ZL) != 0,

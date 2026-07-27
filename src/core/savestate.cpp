@@ -37,7 +37,7 @@ static_assert(sizeof(CSTHeader) == 256, "CSTHeader should be 256 bytes");
 
 constexpr std::array<u8, 4> header_magic_bytes{{'C', 'S', 'T', 0x1B}};
 
-static std::string GetSaveStatePath(u64 program_id, u64 movie_id, u32 slot) {
+std::string GetSaveStatePath(u64 program_id, u64 movie_id, u32 slot) {
     if (movie_id) {
         return fmt::format("{}{:016X}.movie{:016X}.{:02d}.cst",
                            FileUtil::GetUserPath(FileUtil::UserPath::StatesDir), program_id,
@@ -176,7 +176,9 @@ void System::LoadState(u32 slot) {
             throw std::runtime_error("The current app loader doesn't support save states");
         }
     }
-    if (Network::GetRoomMember().lock()->IsConnected()) {
+    // Frontends that never call Network::Init leave the room member null.
+    if (const auto room_member = Network::GetRoomMember().lock();
+        room_member && room_member->IsConnected()) {
         throw std::runtime_error("Unable to load while connected to multiplayer");
     }
 

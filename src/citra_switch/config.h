@@ -100,6 +100,21 @@ const char* GetScreenLayoutName(int index);
 std::uint32_t GetLayoutCycleMask();
 void SetLayoutCycleMask(std::uint32_t mask);
 
+// Queues a save state operation on `slot`. The emulation thread performs it at the next safe
+// point and reports the outcome as an on-screen toast.
+bool RequestSaveState(unsigned int slot);
+bool RequestLoadState(unsigned int slot);
+
+// Removes the state in `slot`, if any.
+bool DeleteSaveState(unsigned int slot);
+
+// Display name for a save state slot.
+std::string SaveStateSlotName(unsigned int slot);
+
+// When `slot` holds a state, its creation time as "DD/MM HH:MM" plus a marker when it came from
+// a different build. Empty when the slot is free.
+std::string SaveStateSlotStatus(unsigned int slot);
+
 // True if the most recent BootRom never reached a successful system.Load.
 bool LoadFailed();
 

@@ -8,6 +8,7 @@
 #include <chrono>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <boost/optional.hpp>
 #include <boost/serialization/version.hpp>
@@ -369,6 +370,17 @@ public:
         return save_state_status;
     }
 
+    /// The outcome of a save state request issued through SendSignal.
+    struct SaveStateEvent {
+        bool loading;
+        u32 slot;
+        bool success;
+        std::string message; ///Failure reason, empty on success.
+    };
+
+    /// Returns the most recent save state outcome and clears it.
+    std::optional<SaveStateEvent> TakeSaveStateEvent();
+
     void SaveState(u32 slot) const;
 
     void LoadState(u32 slot);
@@ -507,6 +519,12 @@ private:
     SaveStateStatus save_state_request_status = SaveStateStatus::NONE;
     u32 save_state_slot = 0;
     std::chrono::steady_clock::time_point save_state_request_time{};
+
+    // Polled once per run loop iteration, so the empty case stays off the mutex.
+    std::atomic_bool save_state_event_pending{false};
+    std::mutex save_state_event_mutex;
+    std::optional<SaveStateEvent> save_state_event;
+    void PostSaveStateEvent(bool loading, u32 slot, bool success, std::string message);
 
     ResultStatus status = ResultStatus::Success;
     std::string status_details = "";

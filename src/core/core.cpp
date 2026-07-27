@@ -158,8 +158,10 @@ System::ResultStatus System::RunLoop(bool tight_loop) {
         } catch (const std::exception& e) {
             LOG_ERROR(Core, "Error loading: {}", e.what());
             status_details = e.what();
+            PostSaveStateEvent(true, slot, false, e.what());
             return ResultStatus::ErrorSavestate;
         }
+        PostSaveStateEvent(true, slot, true, {});
         frame_limiter.WaitOnce();
         return ResultStatus::Success;
     } else if (save_state_request_status == SaveStateStatus::SAVING && kernel.get() &&
@@ -174,16 +176,20 @@ System::ResultStatus System::RunLoop(bool tight_loop) {
         } catch (const std::exception& e) {
             LOG_ERROR(Core, "Error saving: {}", e.what());
             status_details = e.what();
+            PostSaveStateEvent(false, slot, false, e.what());
             return ResultStatus::ErrorSavestate;
         }
+        PostSaveStateEvent(false, slot, true, {});
         frame_limiter.WaitOnce();
         return ResultStatus::Success;
     } else if (save_state_request_status != SaveStateStatus::NONE &&
                (std::chrono::steady_clock::now() - save_state_request_time) >
                    std::chrono::seconds(5)) {
+        const bool was_loading = save_state_request_status == SaveStateStatus::LOADING;
         save_state_request_status = SaveStateStatus::NONE;
         LOG_ERROR(Core, "Cannot perform save state operation due to pending async operations");
         status_details = "Cannot perform save state operation due to pending async operations";
+        PostSaveStateEvent(was_loading, save_state_slot, false, "Timed out waiting for the guest");
         return ResultStatus::ErrorSavestate;
     }
 
@@ -285,6 +291,23 @@ bool System::SendSignal(System::Signal signal, u32 param) {
     current_signal = signal;
     signal_param = param;
     return true;
+}
+
+void System::PostSaveStateEvent(bool loading, u32 slot, bool success, std::string message) {
+    std::scoped_lock lock{save_state_event_mutex};
+    save_state_event = SaveStateEvent{loading, slot, success, std::move(message)};
+    save_state_event_pending.store(true, std::memory_order_release);
+}
+
+std::optional<System::SaveStateEvent> System::TakeSaveStateEvent() {
+    if (!save_state_event_pending.load(std::memory_order_acquire)) {
+        return std::nullopt;
+    }
+    std::scoped_lock lock{save_state_event_mutex};
+    std::optional<SaveStateEvent> event = std::move(save_state_event);
+    save_state_event.reset();
+    save_state_event_pending.store(false, std::memory_order_release);
+    return event;
 }
 
 System::ResultStatus System::SingleStep() {
