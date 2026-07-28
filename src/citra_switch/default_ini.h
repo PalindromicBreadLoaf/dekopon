@@ -104,10 +104,14 @@ gyro_sensitivity_y =
 # Bitmask of screen-layout presets the R3 button cycles through (bit 0 = the first preset).
 # Defaults to every preset enabled. The quick menu always offers every layout.
 layout_cycle_mask =
+# Last address used for Artic Base or the Artic Setup Tool.
+last_artic_base_addr =
 # Freeze the game while the quick menu is open (0, default).
 pause_in_quick_menu = false
 
 [Controls]
+# Use input streamed by the real 3DS while connected to Artic Base (0, default).
+use_artic_base_controller = false
 # Controller remapping, editable from Settings > Controller Mapping.
 # Each control stores the physical Switch button that drives it, by index:
 #   0:A 1:B 2:X 3:Y 4:Up 5:Down 6:Left 7:Right 8:L 9:R 10:+ 11:- 12:ZL 13:ZR 14:L3 15:R3

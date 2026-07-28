@@ -209,11 +209,22 @@ void RunGame(PadState& pad, const std::string& rom) {
             svcSleepThread(4'000'000);
         }
         SwitchFrontend::StopRom();
-        if (SwitchFrontend::LoadFailed()) {
-            SwitchFrontend::SetMenuNotice("Couldn't launch — check keys / ROM");
+        if (SwitchFrontend::ArticDisconnected()) {
+            SwitchFrontend::SetMenuNotice(
+                "Artic connection failed. Please check the address and tool/server version");
+        } else if (SwitchFrontend::LoadFailed()) {
+            SwitchFrontend::SetMenuNotice("Couldn't launch. Please check keys/ROM");
+        } else if (rom.starts_with("articinio://") || rom.starts_with("articinin://")) {
+            const auto installed = SwitchFrontend::GetSystemFileSetupState();
+            const bool complete =
+                rom.starts_with("articinio://") ? installed.old3ds : installed.new3ds;
+            SwitchFrontend::SetMenuNotice(
+                complete ? "System-file setup completed"
+                         : "System-file setup stopped before all files were installed",
+                !complete);
         }
     } else {
-        SwitchFrontend::SetMenuNotice("Couldn't launch — ROM not loadable");
+        SwitchFrontend::SetMenuNotice("Couldn't launch. ROM not loadable");
     }
 
     // Make sure a lingering overlay never survives into the next game or the library menu.

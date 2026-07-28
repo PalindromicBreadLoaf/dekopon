@@ -540,6 +540,7 @@ std::vector<SettingsRow> BuildSettingsPage(SettingsPage page) {
             PointerSourceRow(),
             GyroSensitivityRow("Gyro Sensitivity X", true),
             GyroSensitivityRow("Gyro Sensitivity Y", false),
+            Toggle("Use Artic Base Controller", v.use_artic_base_controller),
             {"Controller Mapping",
              [] { return std::string{"Configure"}; },
              {},

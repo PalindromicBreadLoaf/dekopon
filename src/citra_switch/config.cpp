@@ -19,6 +19,7 @@
 #include "citra_switch/input.h"
 #include "citra_switch/overlay_menu.h"
 #include "core/hle/service/service.h"
+#include "core/system_titles.h"
 
 namespace {
 
@@ -57,6 +58,7 @@ void WriteUserDirPointer(const std::string& user_dir) {
 SwitchFrontend::SwitchPaths s_paths;
 std::string s_active_user_dir;
 std::string s_inserted_cartridge;
+std::string s_artic_base_address;
 
 // Every Settings::values entry config.ini round-trips, in file order. Reading and writing share
 // this list so the two cannot drift apart.
@@ -272,6 +274,10 @@ private:
         if (!s_inserted_cartridge.empty() && !FileUtil::Exists(s_inserted_cartridge)) {
             s_inserted_cartridge.clear();
         }
+        s_artic_base_address =
+            Common::StripSpaces(config->Get("Switch", "last_artic_base_addr", ""));
+        Settings::values.use_artic_base_controller = config->GetBoolean(
+            "Controls", Settings::values.use_artic_base_controller.GetLabel(), false);
 
         SwitchFrontend::SetPointerSource(static_cast<SwitchFrontend::PointerSource>(
             std::clamp<long>(config->GetInteger("Switch", "pointer_source", 0), 0,
@@ -318,6 +324,7 @@ private:
         ss << "roms_dir = " << s_paths.roms_dir << '\n';
         ss << "scan_recursive = " << (s_paths.scan_recursive ? "true" : "false") << '\n';
         ss << "inserted_cartridge = " << s_inserted_cartridge << '\n';
+        ss << "last_artic_base_addr = " << s_artic_base_address << '\n';
         ss << "stretch_fullscreen = "
            << (SwitchFrontend::IsFullscreenStretchEnabled() ? "true" : "false") << '\n';
         ss << "pointer_source = " << static_cast<int>(SwitchFrontend::GetPointerSource()) << '\n';
@@ -329,6 +336,7 @@ private:
         ss << "launch_count = " << launch_count << "\n\n";
 
         ss << "[Controls]\n";
+        WriteSetting(ss, Settings::values.use_artic_base_controller);
         for (int i = 0; i < SwitchFrontend::NumMappableControls; ++i) {
             const auto control = static_cast<SwitchFrontend::MappableControl>(i);
             ss << SwitchFrontend::ControlConfigKey(control) << " = "
@@ -397,6 +405,35 @@ const std::string& GetInsertedCartridge() {
 
 void SetInsertedCartridge(const std::string& path) {
     s_inserted_cartridge = path;
+    SaveConfig();
+}
+
+const std::string& GetArticBaseAddress() {
+    return s_artic_base_address;
+}
+
+void SetArticBaseAddress(const std::string& address) {
+    s_artic_base_address = Common::StripSpaces(address);
+    SaveConfig();
+}
+
+SystemFileSetupState GetSystemFileSetupState() {
+    const auto [old3ds, new3ds] = Core::AreSystemTitlesInstalled();
+    return {.old3ds = old3ds, .new3ds = new3ds};
+}
+
+void PrepareSystemFileSetup(SystemFileSetupMode mode) {
+    Core::UninstallSystemFiles(mode == SystemFileSetupMode::Old3ds
+                                   ? Core::SystemTitleSet::Old3ds
+                                   : Core::SystemTitleSet::New3ds);
+}
+
+bool GetUseArticBaseController() {
+    return Settings::values.use_artic_base_controller.GetValue();
+}
+
+void SetUseArticBaseController(bool enabled) {
+    Settings::values.use_artic_base_controller = enabled;
     SaveConfig();
 }
 

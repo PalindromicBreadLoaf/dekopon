@@ -25,7 +25,7 @@ struct MenuResult {
 MenuResult RunMenu(PadState& pad);
 
 // Queues a one-shot notice for the next RunMenu entry.
-void SetMenuNotice(const std::string& text);
+void SetMenuNotice(const std::string& text, bool error = true);
 
 // Frees the font and shared-font resources cached across RunMenu calls.
 void ShutdownMenu();

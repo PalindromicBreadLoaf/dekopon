@@ -17,6 +17,16 @@ struct SwitchPaths {
     bool scan_recursive{}; // Whether the scan descends into roms_dir's subfolders.
 };
 
+struct SystemFileSetupState {
+    bool old3ds{};
+    bool new3ds{};
+};
+
+enum class SystemFileSetupMode {
+    Old3ds,
+    New3ds,
+};
+
 // Sets up default directory and logging on first boot.
 int Bootstrap();
 
@@ -29,6 +39,16 @@ void SetPaths(const SwitchPaths& paths);
 // Cartridge image exposed to software launched from the emulated HOME Menu.
 const std::string& GetInsertedCartridge();
 void SetInsertedCartridge(const std::string& path);
+
+// Last Artic Base / Artic Setup Tool address entered in the launcher.
+const std::string& GetArticBaseAddress();
+void SetArticBaseAddress(const std::string& address);
+
+SystemFileSetupState GetSystemFileSetupState();
+void PrepareSystemFileSetup(SystemFileSetupMode mode);
+
+bool GetUseArticBaseController();
+void SetUseArticBaseController(bool enabled);
 
 // The dekopon directory this session actually booted from.
 const std::string& GetActiveUserDir();
@@ -125,6 +145,9 @@ std::string SaveStateSlotStatus(unsigned int slot);
 
 // True if the most recent BootRom never reached a successful system.Load.
 bool LoadFailed();
+
+// True if the most recent session failed because the Artic server disconnected or was unreachable.
+bool ArticDisconnected();
 
 // Signals the emulation thread to stop.
 void StopRom();

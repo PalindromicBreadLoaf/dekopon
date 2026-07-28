@@ -5,9 +5,11 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <optional>
 #include <string>
@@ -387,16 +389,17 @@ struct Repeater {
 };
 enum { DirUp = 1, DirDown = 2, DirLeft = 4, DirRight = 8 };
 
-enum class Tab { Library, Install, Settings, Paths };
+enum class Tab { Library, Install, Settings, Paths, Artic };
 
 // Which pane the cursor lives in.
 enum class Focus { Rail, Content };
 
 // Indexed by Tab, so the order has to match the enum.
-constexpr std::array<std::pair<Tab, const char*>, 4> kRailItems{{{Tab::Library, "Library"},
+constexpr std::array<std::pair<Tab, const char*>, 5> kRailItems{{{Tab::Library, "Library"},
                                                                  {Tab::Install, "Install"},
                                                                  {Tab::Settings, "Settings"},
-                                                                 {Tab::Paths, "Paths"}}};
+                                                                 {Tab::Paths, "Paths"},
+                                                                 {Tab::Artic, "Artic"}}};
 
 constexpr bool RailItemsMatchTabs() {
     for (int i = 0; i < static_cast<int>(kRailItems.size()); ++i) {
@@ -565,6 +568,15 @@ const char* PathRowLabel(int row) {
     }
 }
 
+enum ArticRow {
+    ArticRowAddress,
+    ArticRowConnect,
+    ArticRowOld3ds,
+    ArticRowNew3ds,
+    ArticRowController,
+    ArticRowCount,
+};
+
 // The folder browser covers the whole screen, rail included.
 constexpr int kBrowseTop = 108;
 constexpr int kBrowseRowH = 44;
@@ -598,12 +610,17 @@ int DrawHint(Canvas& canvas, int x, int y, const char* button, const char* label
 }
 
 // Indexed by Tab, so the order has to match the enum.
-constexpr std::array<const std::uint8_t*, 4> kRailIconMasks{
-    RailIcons::kLibrary, RailIcons::kInstall, RailIcons::kSettings, RailIcons::kPaths};
+constexpr std::array<const std::uint8_t*, 5> kRailIconMasks{
+    RailIcons::kLibrary, RailIcons::kInstall, RailIcons::kSettings, RailIcons::kPaths, nullptr};
 
 // Draws a nav-rail icon, tinted like text: the mask supplies coverage only.
 void DrawRailIcon(Canvas& canvas, Tab tab, int cx, int cy, u32 color) {
     const std::uint8_t* mask = kRailIconMasks[static_cast<std::size_t>(tab)];
+    if (mask == nullptr) {
+        constexpr const char* label = "AB";
+        g_font.Draw(canvas, cx - g_font.Measure(label, 18) / 2, cy + 6, label, 18, color);
+        return;
+    }
     const int x0 = cx - RailIcons::kSize / 2;
     const int y0 = cy - RailIcons::kSize / 2;
     for (int row = 0; row < RailIcons::kSize; ++row) {
@@ -769,6 +786,61 @@ std::string PromptSearch(const std::string& initial) {
     return R_SUCCEEDED(rc) ? std::string{out} : initial;
 }
 
+std::optional<std::string> PromptArticAddress(const std::string& initial) {
+    SwkbdConfig kbd;
+    if (R_FAILED(swkbdCreate(&kbd, 0))) {
+        return std::nullopt;
+    }
+    swkbdConfigMakePresetDefault(&kbd);
+    swkbdConfigSetHeaderText(&kbd, "Artic server address");
+    swkbdConfigSetGuideText(&kbd, "3DS IP address :port");
+    swkbdConfigSetInitialText(&kbd, initial.c_str());
+    swkbdConfigSetStringLenMax(&kbd, 255);
+    char out[512] = {};
+    const Result rc = swkbdShow(&kbd, out, sizeof(out));
+    swkbdClose(&kbd);
+    if (R_FAILED(rc)) {
+        return std::nullopt;
+    }
+    std::string address{out};
+    const auto first = std::find_if_not(address.begin(), address.end(), [](unsigned char c) {
+        return std::isspace(c) != 0;
+    });
+    const auto last = std::find_if_not(address.rbegin(), address.rend(), [](unsigned char c) {
+                          return std::isspace(c) != 0;
+                      }).base();
+    return first < last ? std::string(first, last) : std::string{};
+}
+
+bool IsValidArticAddress(const std::string& address) {
+    if (address.empty() || address.find('/') != std::string::npos ||
+        std::any_of(address.begin(), address.end(),
+                    [](unsigned char c) { return std::isspace(c) != 0; })) {
+        return false;
+    }
+    const std::size_t colon = address.find(':');
+    const std::string host = address.substr(0, colon);
+    if (host.empty() ||
+        !std::all_of(host.begin(), host.end(), [](unsigned char c) {
+            return std::isalnum(c) != 0 || c == '.' || c == '-' || c == '_';
+        })) {
+        return false;
+    }
+    if (colon == std::string::npos) {
+        return true;
+    }
+    if (colon != address.rfind(':') || colon + 1 == address.size()) {
+        return false;
+    }
+    const std::string port = address.substr(colon + 1);
+    if (!std::all_of(port.begin(), port.end(),
+                     [](unsigned char c) { return std::isdigit(c) != 0; })) {
+        return false;
+    }
+    const unsigned long value = std::strtoul(port.c_str(), nullptr, 10);
+    return value > 0 && value <= 0xFFFF;
+}
+
 std::string FormatSize(u64 bytes) {
     constexpr std::array<const char*, 4> units{"B", "KB", "MB", "GB"};
     double value = static_cast<double>(bytes);
@@ -924,8 +996,10 @@ public:
                 HandleInstall(down, nav);
             } else if (tab == Tab::Settings) {
                 done = HandleSettings(down, nav);
-            } else {
+            } else if (tab == Tab::Paths) {
                 done = HandlePaths(down, nav);
+            } else {
+                done = HandleArtic(down, nav, result);
             }
             if (done) {
                 return result;
@@ -973,8 +1047,11 @@ private:
     int selected = 0;          // Index into `filtered`.
     int scroll_row = 0;
     int paths_sel = 0;
+    int artic_sel = 0;
     std::string search;
     SwitchPaths paths{};
+    SystemFileSetupState artic_install_state{};
+    bool artic_state_loaded = false;
 
     // Settings tab.
     SettingsPage settings_page{SettingsPage::General};
@@ -1053,6 +1130,11 @@ private:
         }
         if (tab == Tab::Settings) {
             SetSettingsPage(settings_page);
+        }
+        if (tab == Tab::Artic && !artic_state_loaded) {
+            ShowBusy("Checking system files...");
+            artic_install_state = GetSystemFileSetupState();
+            artic_state_loaded = true;
         }
     }
 
@@ -1495,6 +1577,96 @@ private:
         return false;
     }
 
+    bool EditArticAddress() {
+        const std::optional<std::string> address = PromptArticAddress(GetArticBaseAddress());
+        if (!address) {
+            return false;
+        }
+        if (!IsValidArticAddress(*address)) {
+            ShowNotice("Enter the 3DS' IP address followed by :port", true);
+            return false;
+        }
+        SetArticBaseAddress(*address);
+        return true;
+    }
+
+    bool EnsureArticAddress() {
+        if (IsValidArticAddress(GetArticBaseAddress())) {
+            return true;
+        }
+        return EditArticAddress();
+    }
+
+    bool ConfirmArticSetup(bool old3ds, bool replacing) {
+        while (appletMainLoop()) {
+            padUpdate(pad_state);
+            const u64 down = padGetButtonsDown(pad_state);
+            if (down & HidNpadButton_A) {
+                return true;
+            }
+            if (down & HidNpadButton_B) {
+                return false;
+            }
+            Draw();
+            DrawArticSetupConfirm(canvas, old3ds, replacing);
+            Present();
+        }
+        return false;
+    }
+
+    bool ActivateArtic(MenuResult& result) {
+        if (artic_sel == ArticRowAddress) {
+            EditArticAddress();
+            return false;
+        }
+        if (artic_sel == ArticRowController) {
+            SetUseArticBaseController(!GetUseArticBaseController());
+            return false;
+        }
+        const bool old3ds = artic_sel == ArticRowOld3ds;
+        if (artic_sel == ArticRowNew3ds && !artic_install_state.old3ds) {
+            ShowNotice("Old 3DS system files must be set up first", true);
+            return false;
+        }
+        if (!EnsureArticAddress()) {
+            return false;
+        }
+        if (artic_sel == ArticRowConnect) {
+            result = {MenuAction::Launch, "articbase://" + GetArticBaseAddress()};
+            return true;
+        }
+
+        const bool replacing =
+            old3ds ? artic_install_state.old3ds : artic_install_state.new3ds;
+        if (!ConfirmArticSetup(old3ds, replacing)) {
+            return false;
+        }
+
+        ShowBusy("Preparing system-file setup...");
+        PrepareSystemFileSetup(old3ds ? SystemFileSetupMode::Old3ds
+                                     : SystemFileSetupMode::New3ds);
+        result = {MenuAction::Launch,
+                  std::string{old3ds ? "articinio://" : "articinin://"} +
+                      GetArticBaseAddress()};
+        return true;
+    }
+
+    bool HandleArtic(u64 down, u32 nav, MenuResult& result) {
+        if (nav & DirUp) {
+            artic_sel = std::max(0, artic_sel - 1);
+        }
+        if (nav & DirDown) {
+            artic_sel = std::min(ArticRowCount - 1, artic_sel + 1);
+        }
+        if (down & HidNpadButton_A) {
+            return ActivateArtic(result);
+        }
+        if (down & HidNpadButton_B) {
+            EnterRail();
+        }
+        return false;
+    }
+
     void PickFolder(int row) {
         const std::string& current = row == PathRowUserDir ? paths.user_dir : paths.roms_dir;
         const std::optional<std::string> picked = BrowseForFolder(current);
@@ -1596,7 +1768,7 @@ private:
                     settings_dirty = true;
                 }
             }
-        } else {
+        } else if (tab == Tab::Paths) {
             for (int i = 0; i < PathRowCount; ++i) {
                 const int y = PathRowTop(i);
                 if (ty < y || ty >= y + PathRowHeight(i)) {
@@ -1610,6 +1782,20 @@ private:
                     PickFolder(i);
                 }
                 break;
+            }
+        } else {
+            constexpr int row_top = kContentTop + 112;
+            constexpr int row_stride = 78;
+            const int row = (ty - row_top) / row_stride;
+            if (ty >= row_top && row >= 0 && row < ArticRowCount) {
+                if (artic_sel == row) {
+                    MenuResult result;
+                    if (ActivateArtic(result)) {
+                        pending_launch = std::move(result.path);
+                    }
+                } else {
+                    artic_sel = row;
+                }
             }
         }
     }
@@ -1782,6 +1968,122 @@ private:
         }
     }
 
+    void DrawArticPage(Canvas& c) {
+        DrawHeader(c, "3DS connectivity");
+        const bool content_focus = focus == Focus::Content;
+        const int x = kContentX + 24;
+        const int w = kContentW - 48;
+
+        g_font.Draw(c, x + 12, kContentTop + 30,
+                    "Run Artic Base or Azahar Artic Setup Tool on a 3DS on this network.", 18,
+                    kColTextDim);
+
+        constexpr int row_top = kContentTop + 112;
+        constexpr int row_h = 68;
+        constexpr int row_stride = 78;
+        for (int i = 0; i < ArticRowCount; ++i) {
+            const int y = row_top + i * row_stride;
+            const bool on = i == artic_sel;
+            if (on) {
+                c.FillRoundRect(x, y, w, row_h, 10,
+                                content_focus ? kColSurfaceHi : kColSurface);
+                c.FillRoundRect(x, y + 8, 4, row_h - 16, 2,
+                                content_focus ? kColAccent : kColBadge);
+            }
+
+            const char* label = "";
+            std::string value;
+            u32 value_color = on && content_focus ? kColAccent : kColTextDim;
+            switch (i) {
+            case ArticRowAddress:
+                label = "Server Address";
+                value = GetArticBaseAddress().empty() ? "Not set" : GetArticBaseAddress();
+                break;
+            case ArticRowConnect:
+                label = "Connect to Artic Base";
+                value = "Play a game off a real 3DS";
+                break;
+            case ArticRowOld3ds:
+                label = "Set Up Old 3DS System Files";
+                value = artic_install_state.old3ds ? "Installed! Select to reinstall" : "Ready";
+                break;
+            case ArticRowNew3ds:
+                label = "Set Up New 3DS System Files";
+                if (!artic_install_state.old3ds) {
+                    value = "Old 3DS setup required first";
+                    value_color = kColError;
+                } else {
+                    value = artic_install_state.new3ds ? "Installed! Select to reinstall"
+                                                      : "Ready";
+                }
+                break;
+            default:
+                label = "Use Real 3DS as a Controller";
+                value = GetUseArticBaseController() ? "On" : "Off";
+                break;
+            }
+            g_font.Draw(c, x + 20, y + 27, label, 21, kColText);
+            g_font.Draw(c, x + 20, y + 52, g_font.Truncate(value, 17, w - 44), 17, value_color);
+        }
+
+        g_font.Draw(c, x + 12, kContentBottom - 30,
+                    "System setup installs unique console data. Keep your Dekopon folder private.",
+                    16, kColTextDim);
+
+        if (focus == Focus::Rail) {
+            DrawRailHints(c);
+        } else {
+            const char* action = "Select";
+            if (artic_sel == ArticRowAddress) {
+                action = "Edit";
+            } else if (artic_sel == ArticRowConnect) {
+                action = "Connect";
+            } else if (artic_sel == ArticRowOld3ds || artic_sel == ArticRowNew3ds) {
+                action = "Set Up";
+            } else if (artic_sel == ArticRowController) {
+                action = "Toggle";
+            }
+            int hx = kContentX + 24;
+            const int hy = kContentBottom + (kHintH - 26) / 2;
+            hx += DrawHint(c, hx, hy, "A", action) + 22;
+            hx += DrawHint(c, hx, hy, "B", "Menu") + 22;
+            DrawHint(c, hx, hy, "+ -", "Exit");
+        }
+    }
+
+    void DrawArticSetupConfirm(Canvas& c, bool old3ds, bool replacing) {
+        constexpr int w = 760;
+        constexpr int h = 326;
+        const int x = (kScreenW - w) / 2;
+        const int y = (kScreenH - h) / 2;
+        c.FillRect(0, 0, kScreenW, kScreenH, MakeColor(0x10, 0x11, 0x13, 0xC0));
+        c.RoundBorder(x, y, w, h, 14, 2, kColBadge, kColSurface);
+
+        const std::string title =
+            std::string{replacing ? "Reinstall " : "Set up "} +
+            (old3ds ? "Old 3DS system files?" : "New 3DS system files?");
+        g_font.Draw(c, x + 28, y + 44, title, 24, kColText);
+        g_font.Draw(c, x + 28, y + 82,
+                    "This connects to Azahar Artic Setup Tool and installs system titles", 18,
+                    kColTextDim);
+        g_font.Draw(c, x + 28, y + 108,
+                    "and console specific data from the real 3DS into this Dekopon folder.", 18,
+                    kColTextDim);
+        g_font.Draw(c, x + 28, y + 148,
+                    "Do not share the folder after setup. Do not take both systems online", 18,
+                    kColError);
+        g_font.Draw(c, x + 28, y + 174,
+                    "at the same time. The selected set of system titles will be replaced.", 18,
+                    kColError);
+        g_font.Draw(c, x + 28, y + 214,
+                    "Both setup modes work from either Old or New 3DS hardware.", 18, kColTextDim);
+
+        int hx = x + 28;
+        const int hy = y + h - 42;
+        hx += DrawHint(c, hx, hy, "A", replacing ? "Reinstall" : "Continue") + 22;
+        DrawHint(c, hx, hy, "B", "Cancel");
+    }
+
     void Draw() {
         Canvas& c = canvas;
         c.Clear(kColBg);
@@ -1792,8 +2094,10 @@ private:
             DrawInstallPage(c);
         } else if (tab == Tab::Settings) {
             DrawSettingsPage(c);
-        } else {
+        } else if (tab == Tab::Paths) {
             DrawPathsPage(c);
+        } else {
+            DrawArticPage(c);
         }
         DrawNotice(c);
         DrawHintBar(c);
@@ -2251,8 +2555,8 @@ MenuResult RunMenu(PadState& pad) {
     return menu.Run(pad);
 }
 
-void SetMenuNotice(const std::string& text) {
-    ShowNotice(text, true);
+void SetMenuNotice(const std::string& text, bool error) {
+    ShowNotice(text, error);
 }
 
 void ShutdownMenu() {
