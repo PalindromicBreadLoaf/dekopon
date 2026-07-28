@@ -26,7 +26,9 @@ Other features include:
 - System language/region toggle
 - And other things I'm probably forgetting.
 - Arctic Base/Azahar Setup Tool support
-- Full 3D support via Nintendo Labo VR Kit
+- Full 3D support via Nintendo Labo VR Kit/Virtual Boy for Nintendo Switch
+- (Virtual) Cartridge insertion support
+- Resolution Upscaling
 
 Features currently in the pipeline are:
 - More performance improvements
