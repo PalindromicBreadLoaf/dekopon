@@ -2564,6 +2564,7 @@ void GMainWindow::UninstallTitles(
     } else if (!future_watcher.isCanceled()) {
         QMessageBox::information(this, tr("Azahar"),
                                  tr("Successfully uninstalled '%1'.").arg(first_name));
+        emit InstalledTitlesChanged();
     }
 }
 
@@ -4455,6 +4456,9 @@ int LaunchQtFrontend(int argc, char* argv[]) {
 
     QObject::connect(&app, &QGuiApplication::applicationStateChanged, &main_window,
                      &GMainWindow::OnAppFocusStateChanged);
+
+    // Process any pending events before executing the app (prevents freeze-on–boot on macOS)
+    app.processEvents();
 
     int result = app.exec();
     return result;
