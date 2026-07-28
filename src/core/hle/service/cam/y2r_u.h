@@ -357,6 +357,11 @@ private:
     bool spacial_dithering_enabled = false;
     bool is_busy_conversion = false;
 
+    // Sustained Y2R bursts are a fallback detector for titles that do not load MovieLib.
+    Core::TimingEventType* movie_detect_stop_event;
+    s64 movie_detect_last_call_tick = 0;
+    int movie_detect_burst_count = 0;
+
     template <class Archive>
     void serialize(Archive& ar, const unsigned int);
     friend class boost::serialization::access;

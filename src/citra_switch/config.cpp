@@ -289,6 +289,11 @@ private:
         SwitchFrontend::SetPauseInQuickMenu(
             config->GetBoolean("Switch", "pause_in_quick_menu", false));
 
+        SwitchFrontend::SetMovieThrottleEnabled(
+            config->GetBoolean("Experimental", "movie_cpu_throttle", false));
+        SwitchFrontend::SetMovieThrottleClockPercentage(static_cast<std::int32_t>(
+            config->GetInteger("Experimental", "movie_cpu_clock_percentage", 45)));
+
         const long all_layouts = (1L << SwitchFrontend::GetScreenLayoutCount()) - 1;
         SwitchFrontend::SetLayoutCycleMask(static_cast<std::uint32_t>(
             config->GetInteger("Switch", "layout_cycle_mask", all_layouts)));
@@ -334,6 +339,12 @@ private:
         ss << "pause_in_quick_menu = "
            << (SwitchFrontend::IsPauseInQuickMenu() ? "true" : "false") << '\n';
         ss << "launch_count = " << launch_count << "\n\n";
+
+        ss << "[Experimental]\n";
+        ss << "movie_cpu_throttle = "
+           << (SwitchFrontend::IsMovieThrottleEnabled() ? "true" : "false") << '\n';
+        ss << "movie_cpu_clock_percentage = " << SwitchFrontend::GetMovieThrottleClockPercentage()
+           << "\n\n";
 
         ss << "[Controls]\n";
         WriteSetting(ss, Settings::values.use_artic_base_controller);

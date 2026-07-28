@@ -6,6 +6,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -425,6 +426,37 @@ public:
         info_led_color_changed = func;
     }
 
+    enum class MoviePlaybackSource : u8 {
+        Cro,
+        Y2r,
+    };
+
+    void SetMoviePlaybackState(MoviePlaybackSource source, bool playing) {
+        const u8 source_bit = static_cast<u8>(1U << static_cast<u8>(source));
+        const bool was_playing = movie_playback_sources != 0;
+        if (playing) {
+            movie_playback_sources |= source_bit;
+        } else {
+            movie_playback_sources &= static_cast<u8>(~source_bit);
+        }
+        const bool is_playing = movie_playback_sources != 0;
+        if (was_playing != is_playing && movie_playback_state_changed) {
+            movie_playback_state_changed(is_playing);
+        }
+    }
+
+    void ResetMoviePlaybackState() {
+        const bool was_playing = movie_playback_sources != 0;
+        movie_playback_sources = 0;
+        if (was_playing && movie_playback_state_changed) {
+            movie_playback_state_changed(false);
+        }
+    }
+
+    void RegisterMoviePlaybackStateChanged(const std::function<void(bool)>& func) {
+        movie_playback_state_changed = func;
+    }
+
     void SetDebugNextProcessFlag() {
         debug_next_process = true;
     }
@@ -553,6 +585,8 @@ private:
 
     Common::Vec3<u8> info_led_color;
     std::function<void()> info_led_color_changed;
+    u8 movie_playback_sources{};
+    std::function<void(bool)> movie_playback_state_changed;
 
     bool debug_next_process;
 

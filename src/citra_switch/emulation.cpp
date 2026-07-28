@@ -22,6 +22,7 @@
 #include "common/logging/log.h"
 #include "common/settings.h"
 #include "core/core.h"
+#include "core/core_timing.h"
 #include "core/frontend/applets/default_applets.h"
 #include "core/loader/loader.h"
 #include "core/movie.h"
@@ -45,9 +46,51 @@ std::atomic<bool> s_artic_disconnected{false};
 std::atomic<bool> s_paused{false};
 // Layout requests originate on the frontend thread and are consumed by the sole GPU producer.
 std::atomic<bool> s_layout_update_pending{false};
+std::atomic<bool> s_movie_throttle_enabled{false};
+std::atomic<std::int32_t> s_movie_throttle_clock_percentage{45};
+std::atomic<bool> s_movie_playback_detected{false};
+std::atomic<bool> s_movie_throttle_active{false};
 
 // How long the paused loop waits between repaints.
 constexpr auto kPausedFrameInterval = std::chrono::milliseconds(8);
+constexpr std::int32_t kMovieThrottleClockMin = 10;
+constexpr std::int32_t kMovieThrottleClockMax = 100;
+
+void ApplyMovieCpuThrottle(Core::System& system) {
+    if (!s_movie_throttle_enabled.load(std::memory_order_relaxed) || !system.IsPoweredOn()) {
+        return;
+    }
+    const u32 percentage =
+        static_cast<u32>(s_movie_throttle_clock_percentage.load(std::memory_order_relaxed));
+    system.CoreTiming().UpdateClockSpeed(percentage);
+    if (!s_movie_throttle_active.exchange(true, std::memory_order_relaxed)) {
+        LOG_INFO(Frontend, "Experimental movie CPU throttle enabled at {}%", percentage);
+    }
+}
+
+void RestoreMovieCpuClock(Core::System& system) {
+    if (!s_movie_throttle_active.exchange(false, std::memory_order_relaxed) ||
+        !system.IsPoweredOn()) {
+        return;
+    }
+    const u32 percentage = Settings::values.cpu_clock_percentage.GetValue();
+    system.CoreTiming().UpdateClockSpeed(percentage);
+    LOG_INFO(Frontend, "Experimental movie CPU throttle ended. CPU clock restored to {}%",
+             percentage);
+}
+
+void RegisterMovieCpuThrottle(Core::System& system) {
+    s_movie_playback_detected = false;
+    s_movie_throttle_active = false;
+    system.RegisterMoviePlaybackStateChanged([&system](bool playing) {
+        s_movie_playback_detected.store(playing, std::memory_order_relaxed);
+        if (playing) {
+            ApplyMovieCpuThrottle(system);
+        } else {
+            RestoreMovieCpuClock(system);
+        }
+    });
+}
 
 // The screen arrangements R3 cycles through.
 struct ScreenLayoutPreset {
@@ -311,6 +354,7 @@ bool BootRom(const std::string& rom_arg) {
     // Hand text input to Horizon's swkbd.
     Frontend::RegisterDefaultApplets(system);
     RegisterKeyboard(system);
+    RegisterMovieCpuThrottle(system);
 
     // Transfer ownership of the window context from the main thread to the emulation thread.
     auto* window = GetEmuWindow();
@@ -503,6 +547,32 @@ void SetLayoutCycleMask(std::uint32_t mask) {
     s_layout_cycle_mask.store(mask & all, std::memory_order_relaxed);
 }
 
+bool IsMovieThrottleEnabled() {
+    return s_movie_throttle_enabled.load(std::memory_order_relaxed);
+}
+
+void SetMovieThrottleEnabled(bool enabled) {
+    s_movie_throttle_enabled.store(enabled, std::memory_order_relaxed);
+    auto& system = Core::System::GetInstance();
+    if (!enabled) {
+        RestoreMovieCpuClock(system);
+    } else if (s_movie_playback_detected.load(std::memory_order_relaxed)) {
+        ApplyMovieCpuThrottle(system);
+    }
+}
+
+std::int32_t GetMovieThrottleClockPercentage() {
+    return s_movie_throttle_clock_percentage.load(std::memory_order_relaxed);
+}
+
+void SetMovieThrottleClockPercentage(std::int32_t percentage) {
+    percentage = std::clamp(percentage, kMovieThrottleClockMin, kMovieThrottleClockMax);
+    s_movie_throttle_clock_percentage.store(percentage, std::memory_order_relaxed);
+    if (s_movie_throttle_active.load(std::memory_order_relaxed)) {
+        ApplyMovieCpuThrottle(Core::System::GetInstance());
+    }
+}
+
 std::string SaveStateSlotName(unsigned int slot) {
     return slot == 0 ? "Quick" : fmt::format("Slot {}", slot);
 }
@@ -580,6 +650,7 @@ void StopRom() {
         window->MakeCurrent();
     }
     auto& system = Core::System::GetInstance();
+    system.ResetMoviePlaybackState();
     if (system.IsPoweredOn()) {
         system.Shutdown();
     }

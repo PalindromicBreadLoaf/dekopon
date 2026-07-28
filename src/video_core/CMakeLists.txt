@@ -209,6 +209,10 @@ if (ENABLE_VULKAN)
         shader/generator/spv_fs_shader_gen.h
     )
     target_link_libraries(video_core PRIVATE vulkan-headers vma sirit SPIRV glslang)
+    if (DEKOPON)
+        # vulkan.hpp changes type definitions when platform extensions are enabled.
+        target_compile_definitions(video_core PRIVATE VK_USE_PLATFORM_VI_NN)
+    endif()
 endif()
 
 if (ENABLE_DEKO3D)

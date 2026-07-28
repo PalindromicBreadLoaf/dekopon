@@ -20,6 +20,7 @@ enum class SettingsPage {
     Layout,
     Controls,
     Storage,
+    Experimental,
     Debug,
     Count,
 };

@@ -40,7 +40,7 @@ void SetPaths(const SwitchPaths& paths);
 const std::string& GetInsertedCartridge();
 void SetInsertedCartridge(const std::string& path);
 
-// Last Artic Base / Artic Setup Tool address entered in the launcher.
+// Last Artic Base/Artic Setup Tool address entered in the launcher.
 const std::string& GetArticBaseAddress();
 void SetArticBaseAddress(const std::string& address);
 
@@ -127,6 +127,12 @@ const char* GetScreenLayoutName(int index);
 // Bitmask of presets included in R3's cycle (bit i = preset i).
 std::uint32_t GetLayoutCycleMask();
 void SetLayoutCycleMask(std::uint32_t mask);
+
+// Experimental movie playback throttle. Disabled by default.
+bool IsMovieThrottleEnabled();
+void SetMovieThrottleEnabled(bool enabled);
+std::int32_t GetMovieThrottleClockPercentage();
+void SetMovieThrottleClockPercentage(std::int32_t percentage);
 
 // Queues a save state operation on `slot`. The emulation thread performs it at the next safe
 // point and reports the outcome as an on-screen toast.

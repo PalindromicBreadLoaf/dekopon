@@ -109,6 +109,12 @@ last_artic_base_addr =
 # Freeze the game while the quick menu is open (0, default).
 pause_in_quick_menu = false
 
+[Experimental]
+# Reduce the emulated CPU clock while movie playback is detected (0, default).
+movie_cpu_throttle = false
+# CPU clock used by the movie throttle, as a percentage (45, default). 10-100.
+movie_cpu_clock_percentage = 45
+
 [Controls]
 # Use input streamed by the real 3DS while connected to Artic Base (0, default).
 use_artic_base_controller = false

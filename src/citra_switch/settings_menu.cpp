@@ -323,6 +323,14 @@ SettingsRow PauseInQuickMenuRow() {
     return BoolRow("Pause In Quick Menu", IsPauseInQuickMenu, SetPauseInQuickMenu);
 }
 
+SettingsRow MovieThrottleClockRow() {
+    return {"Movie CPU Clock",
+            [] { return std::to_string(GetMovieThrottleClockPercentage()) + "%"; },
+            [](int dir) {
+                SetMovieThrottleClockPercentage(GetMovieThrottleClockPercentage() + dir * 5);
+            }};
+}
+
 // The running timers keep their own copy of the clock scale, so a change has to be pushed into
 // core timing to take effect without a reboot.
 SettingsRow CpuClockRow() {
@@ -442,8 +450,12 @@ const char* SettingsPageName(SettingsPage page) {
         return "Controls";
     case SettingsPage::Storage:
         return "Storage";
-    default:
+    case SettingsPage::Experimental:
+        return "Experimental";
+    case SettingsPage::Debug:
         return "Debug";
+    default:
+        return "";
     }
 }
 
@@ -552,7 +564,12 @@ std::vector<SettingsRow> BuildSettingsPage(SettingsPage page) {
             Toggle("Compress CIA Installs", v.compress_cia_installs),
             Toggle("Async Filesystem Operations", v.async_fs_operations),
         };
-    default:
+    case SettingsPage::Experimental:
+        return {
+            BoolRow("Movie CPU Throttle", IsMovieThrottleEnabled, SetMovieThrottleEnabled),
+            MovieThrottleClockRow(),
+        };
+    case SettingsPage::Debug:
         return {
             Toggle("CPU JIT", v.use_cpu_jit),
             Toggle("Deterministic Async Operations", v.deterministic_async_operations),
@@ -567,6 +584,8 @@ std::vector<SettingsRow> BuildSettingsPage(SettingsPage page) {
              {},
              SettingsModal::LogFilter},
         };
+    default:
+        return {};
     }
 }
 
