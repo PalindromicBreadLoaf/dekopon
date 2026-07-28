@@ -114,6 +114,12 @@ pause_in_quick_menu = false
 movie_cpu_throttle = false
 # CPU clock used by the movie throttle, as a percentage (45, default). 10-100.
 movie_cpu_clock_percentage = 45
+# Skip draws that cannot use the accelerated vertex path (0, default).
+skip_slow_draw = false
+# Skip texture copies whose source is not already cached by the GPU (0, default).
+skip_texture_copy = false
+# Keep cached GPU surfaces when the CPU writes 8 bytes or less (0, default).
+skip_cpu_write = false
 
 [Controls]
 # Use input streamed by the real 3DS while connected to Artic Base (0, default).

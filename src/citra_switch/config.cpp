@@ -293,6 +293,9 @@ private:
             config->GetBoolean("Experimental", "movie_cpu_throttle", false));
         SwitchFrontend::SetMovieThrottleClockPercentage(static_cast<std::int32_t>(
             config->GetInteger("Experimental", "movie_cpu_clock_percentage", 45)));
+        ReadSetting("Experimental", Settings::values.skip_slow_draw);
+        ReadSetting("Experimental", Settings::values.skip_texture_copy);
+        ReadSetting("Experimental", Settings::values.skip_cpu_write);
 
         const long all_layouts = (1L << SwitchFrontend::GetScreenLayoutCount()) - 1;
         SwitchFrontend::SetLayoutCycleMask(static_cast<std::uint32_t>(
@@ -344,7 +347,11 @@ private:
         ss << "movie_cpu_throttle = "
            << (SwitchFrontend::IsMovieThrottleEnabled() ? "true" : "false") << '\n';
         ss << "movie_cpu_clock_percentage = " << SwitchFrontend::GetMovieThrottleClockPercentage()
-           << "\n\n";
+           << '\n';
+        WriteSetting(ss, Settings::values.skip_slow_draw);
+        WriteSetting(ss, Settings::values.skip_texture_copy);
+        WriteSetting(ss, Settings::values.skip_cpu_write);
+        ss << '\n';
 
         ss << "[Controls]\n";
         WriteSetting(ss, Settings::values.use_artic_base_controller);

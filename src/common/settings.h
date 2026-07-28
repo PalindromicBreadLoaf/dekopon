@@ -541,6 +541,9 @@ struct Values {
     Setting<bool> dump_command_buffers{false, Keys::dump_command_buffers};
     SwitchableSetting<bool> spirv_shader_gen{true, Keys::spirv_shader_gen};
     SwitchableSetting<bool> disable_spirv_optimizer{true, Keys::disable_spirv_optimizer};
+    SwitchableSetting<bool> skip_slow_draw{false, Keys::skip_slow_draw};
+    SwitchableSetting<bool> skip_texture_copy{false, Keys::skip_texture_copy};
+    SwitchableSetting<bool> skip_cpu_write{false, Keys::skip_cpu_write};
     SwitchableSetting<bool> async_gpu_emulation{false, Keys::async_gpu_emulation};
     SwitchableSetting<bool> strict_gpu_sync{false, Keys::strict_gpu_sync};
     SwitchableSetting<bool> async_shader_compilation{false, Keys::async_shader_compilation};

@@ -568,6 +568,9 @@ std::vector<SettingsRow> BuildSettingsPage(SettingsPage page) {
         return {
             BoolRow("Movie CPU Throttle", IsMovieThrottleEnabled, SetMovieThrottleEnabled),
             MovieThrottleClockRow(),
+            Toggle("Skip Slow Draw", v.skip_slow_draw),
+            Toggle("Skip Texture Copy", v.skip_texture_copy),
+            Toggle("Skip CPU Write", v.skip_cpu_write),
         };
     case SettingsPage::Debug:
         return {
