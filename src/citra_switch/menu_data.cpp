@@ -12,6 +12,7 @@
 
 #include "citra_switch/config.h"
 #include "citra_switch/menu_data.h"
+#include "common/file_derived.h"
 #include "common/file_util.h"
 #include "common/string_util.h"
 #include "common/zstd_compression.h"
@@ -211,7 +212,7 @@ void ScanInstalled(std::vector<GameEntry>& out) {
 
 // Reads a CIA's header and TMD, which both sit ahead of the content.
 bool ReadCiaEntry(const std::string& path, CiaEntry& entry) {
-    std::unique_ptr<FileUtil::IOFile> file = std::make_unique<FileUtil::IOFile>(path, "rb");
+    std::unique_ptr<FileUtil::IOFileBase> file = std::make_unique<FileUtil::IOFile>(path, "rb");
     if (!file->IsOpen()) {
         return false;
     }
