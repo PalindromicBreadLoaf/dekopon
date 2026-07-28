@@ -622,7 +622,7 @@ private:
 
     Core::TimingEventType* SignalInterruptEventType = nullptr;
 
-    std::array<FrameBufferInfo, 2> cached_framebuffer_infos;
+    std::array<FrameBufferInfo, 2> cached_framebuffer_infos{};
     std::array<bool, 2> force_buffer_swap{};
 
     VramBackupHandler vram_backup_handler;

@@ -994,6 +994,12 @@ void RendererVulkan::BuildPipelines() {
 void RendererVulkan::ConfigureFramebufferTexture(TextureInfo& texture,
                                                  const Pica::FramebufferConfig& framebuffer) {
     vk::Device device = instance.GetDevice();
+    if (texture.image || texture.image_view) {
+        // Queued frames still sample the old texture, so it cannot be freed until they are off the
+        // GPU. PresentWindow::RecreateFrame does the same for the same reason.
+        main_present_window.WaitPresent();
+        scheduler.Finish();
+    }
     if (texture.image_view) {
         device.destroyImageView(texture.image_view);
     }

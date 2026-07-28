@@ -137,7 +137,11 @@ RasterizerVulkan::RasterizerVulkan(Memory::MemorySystem& memory, Pica::PicaCore&
     update_queue.Flush();
 }
 
-RasterizerVulkan::~RasterizerVulkan() = default;
+RasterizerVulkan::~RasterizerVulkan() {
+    // The scheduler outlives us and fires these on every submit.
+    scheduler.RegisterOnSubmit([] {});
+    scheduler.RegisterOnDispatch([] {});
+}
 
 void RasterizerVulkan::TickFrame() {
     scheduler.WaitWorker();

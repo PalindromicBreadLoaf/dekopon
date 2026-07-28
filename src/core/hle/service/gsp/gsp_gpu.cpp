@@ -627,6 +627,7 @@ void GSP_GPU::TriggerCmdReqQueue(Kernel::HLERequestContext& ctx) {
         // the function always succeeds.
         IPC::RequestBuilder rb = rp.MakeBuilder(1, 0);
         rb.Push(ResultSuccess);
+        return;
     }
 
     auto* command_buffer = GetCommandBuffer(thread_id_with_rights);
