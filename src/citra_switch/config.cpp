@@ -254,6 +254,11 @@ private:
         Settings::values.is_new_3ds =
             config->GetBoolean("Core", Settings::values.is_new_3ds.GetLabel(), false);
 
+        // Upstream defaults this on, but nothing ever calls PerfStats::EndGameFrame(), so the
+        // game_frames_updated flag it gates on is cleared after the first present and never set
+        // again?
+        Settings::values.use_skip_duplicate_frames = false;
+
         SwitchFrontend::SetFullscreenStretchEnabled(config->GetBoolean(
             "Switch", "stretch_fullscreen",
             config->GetBoolean("Layout", "stretch_fullscreen", false)));
