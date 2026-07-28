@@ -131,6 +131,11 @@ public:
         return features.samplerAnisotropy;
     }
 
+    /// Returns the highest anisotropy ratio samplers may request
+    float MaxSamplerAnisotropy() const {
+        return properties.limits.maxSamplerAnisotropy;
+    }
+
     /// Returns true when VK_KHR_timeline_semaphore is supported
     bool IsTimelineSemaphoreSupported() const {
         return timeline_semaphores;

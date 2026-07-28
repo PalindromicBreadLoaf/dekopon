@@ -1512,7 +1512,6 @@ Sampler::Sampler(TextureRuntime& runtime, const VideoCore::SamplerParams& params
     using TextureConfig = VideoCore::SamplerParams::TextureConfig;
 
     const Instance& instance = runtime.GetInstance();
-    const vk::PhysicalDeviceProperties properties = instance.GetPhysicalDevice().getProperties();
     const bool use_border_color =
         instance.IsCustomBorderColorSupported() && (params.wrap_s == TextureConfig::ClampToBorder ||
                                                     params.wrap_t == TextureConfig::ClampToBorder);
@@ -1530,6 +1529,10 @@ Sampler::Sampler(TextureRuntime& runtime, const VideoCore::SamplerParams& params
     const vk::SamplerAddressMode wrap_v = PicaToVK::WrapMode(params.wrap_t);
     const float lod_min = static_cast<float>(params.lod_min);
     const float lod_max = static_cast<float>(params.lod_max);
+    const float anisotropy = instance.IsAnisotropicFilteringSupported()
+                                 ? std::min(static_cast<float>(params.anisotropy),
+                                            instance.MaxSamplerAnisotropy())
+                                 : 1.0f;
 
     const vk::SamplerCreateInfo sampler_info = {
         .pNext = use_border_color ? &border_color_info : nullptr,
@@ -1539,8 +1542,8 @@ Sampler::Sampler(TextureRuntime& runtime, const VideoCore::SamplerParams& params
         .addressModeU = wrap_u,
         .addressModeV = wrap_v,
         .mipLodBias = 0,
-        .anisotropyEnable = instance.IsAnisotropicFilteringSupported(),
-        .maxAnisotropy = properties.limits.maxSamplerAnisotropy,
+        .anisotropyEnable = anisotropy > 1.0f,
+        .maxAnisotropy = anisotropy,
         .compareEnable = false,
         .compareOp = vk::CompareOp::eAlways,
         .minLod = lod_min,

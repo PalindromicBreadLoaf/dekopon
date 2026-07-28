@@ -408,9 +408,15 @@ typename T::Sampler& RasterizerCache<T>::GetSampler(
         }
     };
 
+    const auto min_filter = get_filter(config.min_filter);
+    const u32 anisotropy = min_filter == TextureFilter::Nearest
+                               ? 1
+                               : Settings::AnisotropyLevel(
+                                     Settings::values.anisotropic_filtering.GetValue());
+
     const SamplerParams params = {
         .mag_filter = get_filter(config.mag_filter),
-        .min_filter = get_filter(config.min_filter),
+        .min_filter = min_filter,
         .mip_filter = get_filter(config.mip_filter),
         .wrap_s = config.wrap_s,
         .wrap_t = config.wrap_t,
@@ -418,6 +424,7 @@ typename T::Sampler& RasterizerCache<T>::GetSampler(
         .lod_min = config.lod.min_level,
         .lod_max = config.lod.max_level,
         .lod_bias = config.lod.bias,
+        .anisotropy = anisotropy,
     };
 
     auto [it, is_new] = samplers.try_emplace(params);

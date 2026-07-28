@@ -377,7 +377,6 @@ void RendererVulkan::CompileShaders() {
     overlay_fragment_shader =
         Compile(HostShaders::VULKAN_OVERLAY_FRAG, vk::ShaderStageFlagBits::eFragment, device);
 
-    auto properties = instance.GetPhysicalDevice().getProperties();
     for (std::size_t i = 0; i < present_samplers.size(); i++) {
         const vk::Filter filter_mode = i == 0 ? vk::Filter::eLinear : vk::Filter::eNearest;
         const vk::SamplerCreateInfo sampler_info = {
@@ -386,8 +385,8 @@ void RendererVulkan::CompileShaders() {
             .mipmapMode = vk::SamplerMipmapMode::eLinear,
             .addressModeU = vk::SamplerAddressMode::eClampToEdge,
             .addressModeV = vk::SamplerAddressMode::eClampToEdge,
-            .anisotropyEnable = instance.IsAnisotropicFilteringSupported(),
-            .maxAnisotropy = properties.limits.maxSamplerAnisotropy,
+            .anisotropyEnable = false,
+            .maxAnisotropy = 1.0f,
             .compareEnable = false,
             .compareOp = vk::CompareOp::eAlways,
             .borderColor = vk::BorderColor::eIntOpaqueBlack,

@@ -89,6 +89,7 @@ void VisitPersistedSettings(Visitor&& visit) {
     visit("Renderer", v.disable_spirv_optimizer);
     visit("Renderer", v.texture_filter);
     visit("Renderer", v.texture_sampling);
+    visit("Renderer", v.anisotropic_filtering);
     visit("Renderer", v.filter_mode);
     visit("Renderer", v.simulate_3ds_gpu_timings);
     visit("Renderer", v.delay_game_render_thread_us);

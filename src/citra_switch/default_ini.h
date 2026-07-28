@@ -40,6 +40,8 @@ use_hw_shader =
 # Texture upscaling filter. 0: none (default), 1: Anime4K, 2: Bicubic, 3: ScaleForce,
 # 4: xBRZ, 5: MMPX. Anything other than none costs GPU time.
 texture_filter =
+# Anisotropic filtering for game textures. 0: off, 1: 2x, 2: 4x, 3: 8x, 4: 16x (default).
+anisotropic_filtering =
 # Sample the 3DS screens bilinearly (1, default) rather than nearest-neighbour.
 filter_mode =
 # Only scale the screens by whole-number factors, trading screen area for even pixels

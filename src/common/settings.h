@@ -135,6 +135,18 @@ enum class TextureSampling : u32 {
     Linear = 2,
 };
 
+enum class AnisotropicFiltering : u32 {
+    Off = 0,
+    X2 = 1,
+    X4 = 2,
+    X8 = 3,
+    X16 = 4,
+};
+
+constexpr u32 AnisotropyLevel(AnisotropicFiltering filtering) {
+    return 1u << static_cast<u32>(filtering);
+}
+
 enum class AspectRatio : u32 {
     Default = 0,
     R16_9 = 1,
@@ -575,6 +587,8 @@ struct Values {
     SwitchableSetting<TextureFilter> texture_filter{TextureFilter::NoFilter, Keys::texture_filter};
     SwitchableSetting<TextureSampling> texture_sampling{TextureSampling::GameControlled,
                                                         Keys::texture_sampling};
+    SwitchableSetting<AnisotropicFiltering> anisotropic_filtering{AnisotropicFiltering::X16,
+                                                                  Keys::anisotropic_filtering};
     SwitchableSetting<u16, true> delay_game_render_thread_us{0, 0, 65000,
                                                              Keys::delay_game_render_thread_us};
     SwitchableSetting<bool> simulate_3ds_gpu_timings{false, Keys::simulate_3ds_gpu_timings};

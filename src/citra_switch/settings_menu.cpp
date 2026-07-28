@@ -57,6 +57,8 @@ constexpr std::array<const char*, 6> kTextureFilterNames{"None",       "Anime4K"
 constexpr std::array<const char*, 3> kTextureSamplingNames{"Game controlled", "Nearest neighbour",
                                                            "Linear"};
 
+constexpr std::array<const char*, 5> kAnisotropyNames{"Off", "2x", "4x", "8x", "16x"};
+
 constexpr std::array<const char*, 3> kAudioEmulationNames{"HLE", "LLE", "LLE (multithreaded)"};
 
 constexpr std::array<const char*, 7> kStereoNames{
@@ -509,6 +511,7 @@ std::vector<SettingsRow> BuildSettingsPage(SettingsPage page) {
             Toggle("Integer Scaling", v.use_integer_scaling),
             Toggle("Linear Filtering", v.filter_mode),
             Choice("Texture Filter", v.texture_filter, kTextureFilterNames),
+            Choice("Anisotropic Filtering", v.anisotropic_filtering, kAnisotropyNames),
             StereoModeRow(),
             Number("Stereoscopic Depth", v.factor_3d, 0, 100, 5, "%"),
             Toggle("Swap Eyes", v.swap_eyes_3d),
@@ -636,6 +639,7 @@ std::vector<SettingsRow> BuildQuickPage(QuickPage page) {
             Toggle("Linear Filtering", v.filter_mode),
             Choice("Texture Filter", v.texture_filter, kTextureFilterNames),
             Choice("Texture Sampling", v.texture_sampling, kTextureSamplingNames),
+            Choice("Anisotropic Filtering", v.anisotropic_filtering, kAnisotropyNames),
             Toggle("Hardware Shader", v.use_hw_shader),
             Toggle("Custom Textures", v.custom_textures),
         };

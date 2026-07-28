@@ -21,6 +21,7 @@ struct SamplerParams {
     u32 lod_min = 0;
     u32 lod_max = 0;
     s32 lod_bias = 0;
+    u32 anisotropy = 1;
 
     auto operator<=>(const SamplerParams&) const noexcept = default;
 
