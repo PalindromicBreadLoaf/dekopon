@@ -97,6 +97,11 @@ enum class BooleanSetting(
     HW_SHADER(SettingKeys.use_hw_shader(), Settings.SECTION_RENDERER, true),
     SHADER_JIT(SettingKeys.use_shader_jit(), Settings.SECTION_RENDERER, true),
     VSYNC(SettingKeys.use_vsync(), Settings.SECTION_RENDERER, false),
+    USE_SKIP_DUPLICATE_FRAMES(
+        SettingKeys.use_skip_duplicate_frames(),
+        Settings.SECTION_RENDERER,
+        false
+    ),
     USE_FRAME_LIMIT(SettingKeys.use_frame_limit(), Settings.SECTION_RENDERER, true),
     DEBUG_RENDERER(SettingKeys.renderer_debug(), Settings.SECTION_DEBUG, false),
     DISABLE_RIGHT_EYE_RENDER(
@@ -123,7 +128,7 @@ enum class BooleanSetting(
     SIMULATE_3DS_GPU_TIMINGS(
         SettingKeys.simulate_3ds_gpu_timings(),
         Settings.SECTION_RENDERER,
-        true
+        false
     );
 
     override var boolean: Boolean = defaultValue

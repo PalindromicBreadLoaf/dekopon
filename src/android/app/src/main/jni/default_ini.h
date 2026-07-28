@@ -80,6 +80,9 @@ static const char* android_config_default_file_content = (BOOST_HANA_STRING(R"(
 # Use Artic Controller when connected to Artic Base Server. (Default 0)
 )") DECLARE_KEY(use_artic_base_controller) BOOST_HANA_STRING(R"(
 
+# List of buttons which will be triggered by the combo button. (Default [] or empty)
+)") DECLARE_KEY(combo_button_buttons) BOOST_HANA_STRING(R"(
+
 [Core]
 # Whether to use the Just-In-Time (JIT) compiler for CPU emulation
 # 0: Interpreter (slow), 1 (default): JIT (fast)
@@ -129,6 +132,10 @@ static const char* android_config_default_file_content = (BOOST_HANA_STRING(R"(
 # if you have screen tearing, which is unusual on Android
 # 0 (default): Off, 1: On
 )") DECLARE_KEY(use_vsync) BOOST_HANA_STRING(R"(
+
+# Skips display of duplicated frames in 30 fps games
+# 0: Off, 1 (default): On
+)") DECLARE_KEY(use_skip_duplicate_frames) BOOST_HANA_STRING(R"(
 
 # Reduce stuttering by storing and loading generated shaders to disk
 # 0: Off, 1 (default. On)
@@ -545,6 +552,10 @@ static const char* android_config_default_file_content = (BOOST_HANA_STRING(R"(
 # Whether to enable additional debugging information during emulation
 # 0 (default): Off, 1: On
 )") DECLARE_KEY(renderer_debug) BOOST_HANA_STRING(R"(
+
+# Whether to enable PICA200 debugging (does nothing on Android)
+# 0 (default): Off, 1: On
+)") DECLARE_KEY(pica_debugging) BOOST_HANA_STRING(R"(
 
 # Flush log output on every message
 # Immediately commits the debug log to file. Use this if Azahar crashes and the log output is being cut.

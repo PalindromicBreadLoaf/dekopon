@@ -156,6 +156,7 @@
     <string name="button_home">HOME</string>
     <string name="button_swap">Swap Screens</string>
     <string name="button_turbo">Turbo</string>
+    <string name="button_combo">Combo Button</string>
     <string name="button_x" translatable="false">X</string>
     <string name="button_y" translatable="false">Y</string>
     <string name="button_l" translatable="false">L</string>
@@ -167,6 +168,8 @@
     <string name="turbo_limit_hotkey">Turbo Speed</string>
     <string name="turbo_enabled_toast">Turbo Speed Enabled</string>
     <string name="turbo_disabled_toast">Turbo Speed Disabled</string>
+    <string name="combo_button_settings">Configure Combo Button</string>
+    <string name="combo_button_settings_description">Select which buttons are triggered by the Combo Button.</string>
 
     <!-- System files strings -->
     <string name="setup_system_files">System Files</string>
@@ -271,6 +274,8 @@
     <string name="advanced">Advanced</string>
     <string name="texture_sampling_name">Texture Sampling</string>
     <string name="texture_sampling_description">Overrides the sampling filter used by games. This can be useful in certain cases with poorly behaved games when upscaling. If unsure, set this to Game Controlled.</string>
+    <string name="use_skip_duplicate_frames">Skip Presenting Duplicate Frames</string>
+    <string name="use_skip_duplicate_frames_description">Skips the presentation of frames that are not unique. It also allows external frame generation tools to work correctly with 30fps games</string>
     <string name="shaders_accurate_mul">Accurate Multiplication</string>
     <string name="shaders_accurate_mul_description">Uses more accurate multiplication in hardware shaders, which may fix some graphical bugs. When enabled, performance will be reduced.</string>
     <string name="asynchronous_gpu">Enable Asynchronous GPU Emulation</string>

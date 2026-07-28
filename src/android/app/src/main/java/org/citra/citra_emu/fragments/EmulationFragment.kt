@@ -69,6 +69,7 @@ import org.citra.citra_emu.display.PortraitScreenLayout
 import org.citra.citra_emu.display.ScreenAdjustmentUtil
 import org.citra.citra_emu.display.ScreenLayout
 import org.citra.citra_emu.display.SecondaryDisplayLayout
+import org.citra.citra_emu.features.hotkeys.Hotkey
 import org.citra.citra_emu.features.settings.model.BooleanSetting
 import org.citra.citra_emu.features.settings.model.IntSetting
 import org.citra.citra_emu.features.settings.model.SettingsViewModel
@@ -862,6 +863,16 @@ class EmulationFragment :
                     true
                 }
 
+                R.id.menu_emulation_adjust_scale_button_turbo -> {
+                    showAdjustScaleDialog("controlScale-" + NativeLibrary.ButtonType.BUTTON_TURBO)
+                    true
+                }
+
+                R.id.menu_emulation_adjust_scale_button_combo -> {
+                    showAdjustScaleDialog("controlScale-" + Hotkey.COMBO_BUTTON.button)
+                    true
+                }
+
                 R.id.menu_emulation_adjust_opacity -> {
                     showAdjustOpacityDialog()
                     true
@@ -1241,13 +1252,13 @@ class EmulationFragment :
 
     private fun showToggleControlsDialog() {
         val editor = preferences.edit()
-        val enabledButtons = BooleanArray(16)
+        val enabledButtons = BooleanArray(17)
         enabledButtons.forEachIndexed { i: Int, _: Boolean ->
             // Buttons that are disabled by default
             var defaultValue = true
             when (i) {
                 // TODO: Remove these magic numbers
-                6, 7, 12, 13, 14, 15 -> defaultValue = false
+                6, 7, 12, 13, 14, 15, 16 -> defaultValue = false
             }
             enabledButtons[i] = preferences.getBoolean("buttonToggle$i", defaultValue)
         }
@@ -1282,18 +1293,25 @@ class EmulationFragment :
         val sliderBinding = DialogSliderBinding.inflate(layoutInflater)
 
         sliderBinding.apply {
-            slider.valueTo = 150f
-            slider.valueFrom = 0f
-            slider.value = preferences.getInt(target, 50).toFloat()
-            textValue.setText((slider.value + 50).toInt().toString())
+            val sliderStart = 50
+            val sliderMin = 0
+            val sliderMax = 150
+            slider.valueFrom = sliderMin.toFloat()
+            slider.valueTo = sliderMax.toFloat()
+            slider.value = preferences.getInt(target, sliderStart)
+                .toFloat()
+                .coerceIn(slider.valueFrom..slider.valueTo)
+            @SuppressLint("SetTextI18n")
+            textValue.setText((slider.value + sliderStart).toInt().toString())
             textValue.addTextChangedListener(object : TextWatcher {
                 override fun afterTextChanged(s: Editable) {
                     val value = s.toString().toIntOrNull()
-                    if (value == null || value < 50 || value > 150) {
+                    val realValue = value?.minus(sliderStart)
+                    if (realValue == null || realValue < sliderMin || realValue > sliderMax) {
                         textInput.error = "Inappropriate Value"
                     } else {
                         textInput.error = null
-                        slider.value = value.toFloat() - 50
+                        slider.value = realValue.toFloat()
                     }
                 }
 
@@ -1306,8 +1324,10 @@ class EmulationFragment :
                         progress: Float,
                         _: Boolean
                     ->
-                    if (textValue.text.toString() != (slider.value + 50).toInt().toString()) {
-                        textValue.setText((slider.value + 50).toInt().toString())
+                    if (textValue.text.toString() !=
+                        (slider.value + sliderStart).toInt().toString()
+                    ) {
+                        textValue.setText((slider.value + sliderStart).toInt().toString())
                         textValue.setSelection(textValue.length())
                         setControlScale(slider.value.toInt(), target)
                     }
@@ -1415,6 +1435,8 @@ class EmulationFragment :
         resetScale("controlScale-" + NativeLibrary.ButtonType.STICK_C)
         resetScale("controlScale-" + NativeLibrary.ButtonType.BUTTON_HOME)
         resetScale("controlScale-" + NativeLibrary.ButtonType.BUTTON_SWAP)
+        resetScale("controlScale-" + NativeLibrary.ButtonType.BUTTON_TURBO)
+        resetScale("controlScale-" + Hotkey.COMBO_BUTTON.button)
         binding.surfaceInputOverlay.refreshControls()
     }
 
@@ -1442,10 +1464,11 @@ class EmulationFragment :
             .apply()
 
         val editor = preferences.edit()
-        for (i in 0 until 16) {
+        // TODO: This code sucks balls. We need to do this differently. -OS
+        for (i in 0 until 17) {
             var defaultValue = true
             when (i) {
-                6, 7, 12, 13, 14, 15 -> defaultValue = false
+                6, 7, 12, 13, 14, 15, 16 -> defaultValue = false
             }
             editor.putBoolean("buttonToggle$i", defaultValue)
         }

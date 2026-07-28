@@ -471,6 +471,10 @@ public:
 
     void DebugUnscheduleAllThreadsFromFrontend(bool unschedule);
 
+    void SetGDBPortOverride(int port) {
+        override_gdb_port = port;
+    }
+
 private:
     /**
      * Initialize the emulated system.
@@ -589,6 +593,7 @@ private:
     std::function<void(bool)> movie_playback_state_changed;
 
     bool debug_next_process;
+    int override_gdb_port = -1;
 
     friend class boost::serialization::access;
     template <typename Archive>
