@@ -32,7 +32,13 @@ using VideoCore::SurfaceType;
 using namespace Common::Literals;
 using namespace Pica::Shader::Generator;
 
+#ifdef __SWITCH__
+// NXVK backs host visible memory with plain system allocations, so a ring only costs what it
+// reserves. 32 MiB is far above what a frame of PICA geometry streams.
+constexpr u64 STREAM_BUFFER_SIZE = 32_MiB;
+#else
 constexpr u64 STREAM_BUFFER_SIZE = 64_MiB;
+#endif
 constexpr u64 UNIFORM_BUFFER_SIZE = 8_MiB;
 constexpr u64 TEXTURE_BUFFER_SIZE = 2_MiB;
 

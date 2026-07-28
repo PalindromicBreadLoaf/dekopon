@@ -158,7 +158,13 @@ vk::ImageSubresourceRange MakeSubresourceRange(vk::ImageAspectFlags aspect, u32 
     };
 }
 
+#ifdef __SWITCH__
+// The ring only has to be wide enough for the largest single custom texture level
+// (4096x4096 RGBA8) to fit in one mapping.
+constexpr u64 UPLOAD_BUFFER_SIZE = 64_MiB;
+#else
 constexpr u64 UPLOAD_BUFFER_SIZE = 512_MiB;
+#endif
 constexpr u64 DOWNLOAD_BUFFER_SIZE = 16_MiB;
 
 } // Anonymous namespace
@@ -946,6 +952,11 @@ void Surface::UploadCustom(const VideoCore::Material* material, u32 level) {
 
     const auto upload = [&](Type type, VideoCore::CustomTexture* texture) {
         const u32 custom_size = static_cast<u32>(texture->data.size());
+        if (custom_size > runtime.upload_buffer.GetSize()) {
+            LOG_ERROR(Render_Vulkan, "Custom texture {}x{} needs {} KiB, upload buffer holds {} KiB",
+                      width, height, custom_size / 1024, runtime.upload_buffer.GetSize() / 1024);
+            return;
+        }
         const RecordParams params = {
             .aspect = vk::ImageAspectFlagBits::eColor,
             .pipeline_flags = PipelineStageFlags(),

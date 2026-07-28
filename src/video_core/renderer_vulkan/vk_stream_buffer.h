@@ -44,6 +44,11 @@ public:
         return buffer;
     }
 
+    /// Returns the size actually allocated, which may be less than the size requested.
+    u64 GetSize() const noexcept {
+        return stream_buffer_size;
+    }
+
 private:
     struct Watch {
         u64 tick{};
