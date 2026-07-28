@@ -25,9 +25,11 @@ Other features include:
 - Cheat, mod (LayeredFS), and texture-pack support
 - System language/region toggle
 - And other things I'm probably forgetting.
+- Arctic Base/Azahar Setup Tool support
+- Full 3D support via Nintendo Labo VR Kit
 
 Features currently in the pipeline are:
-- Arctic Base support
+- More performance improvements
 
 Feel free to request more features, but do note they may or may not be implemented due to either feasibility or time.
 
@@ -129,7 +131,7 @@ If you want to implement a change and have the technical capability to do so, we
 
 If you are contributing a new feature, it is highly suggested that you first make a Feature Request issue to discuss the addition before writing any code. This is to ensure that your time isn't wasted working on a feature which isn't deemed appropriate for the project.
 
-After creating a pull request, please don't repeatedly merge `master` into your branch. A maintainer will update the branch for you if/ when it is appropriate to do so.
+After creating a pull request, please don't repeatedly merge `master` into your branch. A maintainer will update the branch for you if/when it is appropriate to do so.
 
 ### Compatibility reports
 
