@@ -217,9 +217,7 @@ if (DEKOPON)
     # x86_64-only optimisation flag.
     set(ENABLE_SSE42 OFF CACHE BOOL "Disabled for Switch" FORCE)
 
-    # LTO miscompiles/misterminates the .eh_frame on the aarch64 NRO target
-    # TODO: Fix this
-    set(ENABLE_LTO OFF CACHE BOOL "Disabled for Switch)" FORCE)
+    set(ENABLE_LTO ON CACHE BOOL "Enabled for Switch")
 
     set(ENABLE_SOFTWARE_RENDERER ON CACHE BOOL "Kept for accuracy checks" FORCE)
     set(ENABLE_VULKAN ON CACHE BOOL "Vulkan via NXVK" FORCE)
