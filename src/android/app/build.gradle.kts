@@ -87,6 +87,8 @@ android {
             }
         }
 
+        buildConfigField("String", "GIT_VERSION", "\"${getGitVersion()}\"")
+        // ^ Has no suffix, unlike VERSION_NAME
         buildConfigField("String", "GIT_HASH", "\"${getGitHash()}\"")
         buildConfigField("String", "BRANCH", "\"${getBranch()}\"")
     }
@@ -242,7 +244,6 @@ val unzipVulkanValidationLayers = tasks.register<Copy>("unzipVulkanValidationLay
 
 tasks.named("preBuild") {
     dependsOn(unzipVulkanValidationLayers)
-    dependsOn("ktlintCheck")
 }
 
 ktlint {

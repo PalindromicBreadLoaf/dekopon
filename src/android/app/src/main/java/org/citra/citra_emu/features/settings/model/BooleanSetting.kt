@@ -100,7 +100,7 @@ enum class BooleanSetting(
     USE_SKIP_DUPLICATE_FRAMES(
         SettingKeys.use_skip_duplicate_frames(),
         Settings.SECTION_RENDERER,
-        false
+        true
     ),
     USE_FRAME_LIMIT(SettingKeys.use_frame_limit(), Settings.SECTION_RENDERER, true),
     DEBUG_RENDERER(SettingKeys.renderer_debug(), Settings.SECTION_DEBUG, false),
@@ -129,7 +129,8 @@ enum class BooleanSetting(
         SettingKeys.simulate_3ds_gpu_timings(),
         Settings.SECTION_RENDERER,
         false
-    );
+    ),
+    CHECK_FOR_UPDATES(SettingKeys.check_for_update_on_start(), Settings.SECTION_MISC, true);
 
     override var boolean: Boolean = defaultValue
 

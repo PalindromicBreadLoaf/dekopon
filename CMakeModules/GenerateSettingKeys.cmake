@@ -159,8 +159,9 @@ foreach(KEY IN ITEMS
     "record_frame_times"
     "language" # FIXME: DUPLICATE KEY (libretro equivalent: language_value)
     "web_api_url"
-    "citra_username"
-    "citra_token"
+    "network_token"
+    "check_for_update_on_start"
+    "update_check_channel"
 )
     set(SETTING_KEY_LIST "${SETTING_KEY_LIST}\n\"${KEY}\",")
     set(SETTING_KEY_DEFINITIONS "${SETTING_KEY_DEFINITIONS}\nDEFINE_KEY(${KEY})")
@@ -212,6 +213,7 @@ if (ENABLE_QT)
         "geometry"
         "state"
         "geometryRenderWindow"
+        "geometrySecondaryWindow"
         "gameListHeaderState"
         "microProfileDialogGeometry"
         "name"
@@ -220,16 +222,48 @@ if (ENABLE_QT)
         "use_touchpad"
         "controller_touch_device"
         "use_touch_from_button"
+        "input_maptype"
+        "controller_hotkey_maptype"
         "touch_from_button_map"
         "touch_from_button_maps" # Why are these two so similar? Basically typo bait
         "nand_directory"
         "sdmc_directory"
         "game_id"
         "KeySeq"
+        "controller_keyseq"
         "gamedirs"
         "libvorbis"
         "Context"
         "favorites"
+        "microProfileDialogVisible"
+        "singleWindowMode"
+        "fullscreen"
+        "displayTitleBars"
+        "showFilterBar"
+        "showStatusBar"
+        "show_advanced_frametime_info"
+        "confirmClose"
+        "saveStateWarning"
+        "firstStart"
+        "pauseWhenInBackground"
+        "muteWhenInBackground"
+        "hideInactiveMouse"
+        "inserted_cartridge"
+        "enable_discord_presence"
+        "iconSize"
+        "row1" # The keys for this and...
+        "row2" # this suck ass.
+        "hideNoIcon"
+        "singleLineMode"
+        "show_compat_column"
+        "show_region_column"
+        "show_type_column"
+        "show_size_column"
+        "show_play_time_column"
+        "screenshot_resolution_factor"
+        "screenshotPath"
+        "calloutFlags"
+        "showConsole"
     )
         set(SETTING_KEY_LIST "${SETTING_KEY_LIST}\n\"${KEY}\",")
         set(SETTING_KEY_DEFINITIONS "${SETTING_KEY_DEFINITIONS}\nDEFINE_KEY(${KEY})")

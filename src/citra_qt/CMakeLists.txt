@@ -63,6 +63,9 @@ add_library(citra_qt STATIC EXCLUDE_FROM_ALL
     configuration/configure_hotkeys.cpp
     configuration/configure_hotkeys.h
     configuration/configure_hotkeys.ui
+    configuration/configure_hotkeys_controller.cpp
+    configuration/configure_hotkeys_controller.h
+    configuration/configure_hotkeys_controller.ui
     configuration/configure_input.cpp
     configuration/configure_input.h
     configuration/configure_input.ui
@@ -85,9 +88,9 @@ add_library(citra_qt STATIC EXCLUDE_FROM_ALL
     configuration/configure_ui.cpp
     configuration/configure_ui.h
     configuration/configure_ui.ui
-    configuration/configure_web.cpp
-    configuration/configure_web.h
-    configuration/configure_web.ui
+    configuration/configure_network.cpp
+    configuration/configure_network.h
+    configuration/configure_network.ui
     configuration/configure_cheats.cpp
     configuration/configure_cheats.h
     configuration/configure_cheats.ui
@@ -140,6 +143,8 @@ add_library(citra_qt STATIC EXCLUDE_FROM_ALL
     game_list_worker.h
     hotkeys.cpp
     hotkeys.h
+    hotkey_monitor.cpp
+    hotkey_monitor.h
     loading_screen.cpp
     loading_screen.h
     loading_screen.ui
@@ -190,6 +195,8 @@ add_library(citra_qt STATIC EXCLUDE_FROM_ALL
     util/graphics_device_info.h
     util/sequence_dialog/sequence_dialog.cpp
     util/sequence_dialog/sequence_dialog.h
+    util/sequence_dialog/controller_sequence_dialog.cpp
+    util/sequence_dialog/controller_sequence_dialog.h
     util/spinbox.cpp
     util/spinbox.h
     util/util.cpp

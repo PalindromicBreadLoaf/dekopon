@@ -54,6 +54,8 @@ enum class LayoutOption : u32 { // Shouldn't these have set numbers to prevent l
     OverlayScreen,
 };
 
+enum class InputMappingType : u8 { AllControllers, Guid, GuidPort };
+
 /** Defines the layout option for mobile portrait */
 enum class PortraitLayoutOption : u32 {
     // formerly mobile portrait
@@ -464,6 +466,7 @@ struct InputProfile {
     std::string udp_input_address;
     u16 udp_input_port;
     u8 udp_pad_index;
+    InputMappingType maptype = Settings::InputMappingType::GuidPort;
 };
 
 struct TouchFromButtonMap {
@@ -683,6 +686,10 @@ struct Values {
     Setting<bool> enable_rpc_server{false, Keys::enable_rpc_server};
     Setting<bool> toggle_unique_data_console_type{false, Keys::toggle_unique_data_console_type};
     Setting<bool> break_on_unmapped_memory_access{false, Keys::break_on_unmapped_memory_access};
+
+    // WebService
+    Setting<std::string> web_api_url{"", Keys::web_api_url};
+    Setting<std::string> network_token{"", Keys::network_token};
 
     // Miscellaneous
     Setting<std::string> log_filter{"*:Info", Keys::log_filter};
