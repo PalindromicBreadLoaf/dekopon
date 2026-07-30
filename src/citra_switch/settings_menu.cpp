@@ -480,6 +480,10 @@ std::vector<SettingsRow> BuildSettingsPage(SettingsPage page) {
             Toggle("Show FPS Counter", v.show_fps),
             Toggle("Shader Compile Notice", v.show_shader_compile_notice),
             PauseInQuickMenuRow(),
+            {"Reset All Settings",
+             [] { return std::string{"Defaults"}; },
+             {},
+             SettingsModal::ResetDefaults},
         };
     case SettingsPage::System:
         return {
@@ -589,6 +593,7 @@ std::vector<SettingsRow> BuildSettingsPage(SettingsPage page) {
     case SettingsPage::Debug:
         return {
             Toggle("CPU JIT", v.use_cpu_jit),
+            Toggle("Fastmem (restart)", v.fastmem),
             Toggle("Deterministic Async Operations", v.deterministic_async_operations),
             Toggle("Delay Start For LLE Modules", v.delay_start_for_lle_modules),
             Toggle("Unique Data Console Type", v.toggle_unique_data_console_type),

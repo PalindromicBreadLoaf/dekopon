@@ -78,6 +78,9 @@ std::string GetDefaultRomsDir(const std::string& user_dir);
 // Serialises the current Settings::values back to config.ini.
 void SaveConfig();
 
+// Puts everything the Settings tab covers back to defaults.
+void ResetSettings();
+
 // Flushes and stops the logger.
 void Shutdown();
 

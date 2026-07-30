@@ -1035,6 +1035,8 @@ public:
             bool done = false;
             if (install_active) {
                 PumpInstall();
+            } else if (reset_confirm_open) {
+                HandleResetConfirm(down);
             } else if (layout_picker_open) {
                 HandleLayoutPicker(down, nav);
             } else if (remap_open) {
@@ -1064,7 +1066,8 @@ public:
                 return result;
             }
 
-            if (!install_active && !details_open && !layout_picker_open && !remap_open) {
+            if (!install_active && !details_open && !layout_picker_open && !remap_open &&
+                !reset_confirm_open) {
                 HandleTouch();
             }
             if (pending_launch) {
@@ -1139,6 +1142,9 @@ private:
     bool remap_open = false;
     int remap_sel = 0;
     int remap_scroll = 0;
+
+    // Confirmation for the reset-to-defaults row.
+    bool reset_confirm_open = false;
 
     // Install page.
     std::string install_dir;
@@ -1480,6 +1486,9 @@ private:
             SetLogFilter(PromptLogFilter(GetLogFilter()));
             settings_dirty = true;
             break;
+        case SettingsModal::ResetDefaults:
+            reset_confirm_open = true;
+            break;
         default:
             break;
         }
@@ -1549,6 +1558,20 @@ private:
         }
         if (down & HidNpadButton_B) {
             layout_picker_open = false;
+        }
+    }
+
+    void HandleResetConfirm(u64 down) {
+        if (down & HidNpadButton_A) {
+            ResetSettings();
+            // ResetSettings() has already written the defaults out.
+            settings_dirty = false;
+            reset_confirm_open = false;
+            ShowNotice("Settings reset to defaults", false);
+            return;
+        }
+        if (down & HidNpadButton_B) {
+            reset_confirm_open = false;
         }
     }
 
@@ -2190,6 +2213,9 @@ private:
         if (remap_open) {
             DrawRemapPage(c);
         }
+        if (reset_confirm_open) {
+            DrawResetConfirm(c);
+        }
         if (install_active) {
             DrawInstallProgress(c);
         }
@@ -2498,6 +2524,27 @@ private:
             hx += DrawHint(c, hx, hy, "B", "Menu") + 22;
             DrawHint(c, hx, hy, "+ -", "Exit");
         }
+    }
+
+    void DrawResetConfirm(Canvas& c) {
+        const int w = std::min(620, g_screen_w - 48);
+        constexpr int h = 214;
+        const int x = (g_screen_w - w) / 2;
+        const int y = (g_screen_h - h) / 2;
+        c.FillRect(0, 0, g_screen_w, g_screen_h, MakeColor(0x10, 0x11, 0x13, 0xC0));
+        c.RoundBorder(x, y, w, h, 14, 2, kColBadge, kColSurface);
+
+        g_font.Draw(c, x + 24, y + 46, "Reset all settings?", 24, kColText);
+        g_font.Draw(c, x + 24, y + 86, "All settings will be set to their default for this version,", 18,
+                    kColTextDim);
+        g_font.Draw(c, x + 24, y + 112, "with controller mappings included.", 18, kColTextDim);
+        g_font.Draw(c, x + 24, y + 146, "Your folders, titles, and saves are untouched.", 18,
+                    kColAccent);
+
+        int hx = x + 24;
+        const int hy = y + h - 38;
+        hx += DrawHint(c, hx, hy, "A", "Reset") + 22;
+        DrawHint(c, hx, hy, "B", "Cancel");
     }
 
     // A centred modal to choose which layouts R3 cycles through in-game.

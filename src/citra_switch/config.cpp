@@ -70,6 +70,7 @@ void VisitPersistedSettings(Visitor&& visit) {
     auto& v = Settings::values;
 
     visit("Core", v.use_cpu_jit);
+    visit("Core", v.fastmem);
     visit("Core", v.cpu_clock_percentage);
     visit("Core", v.is_new_3ds);
 
@@ -195,6 +196,24 @@ public:
 
     int LaunchCount() const {
         return launch_count;
+    }
+
+    // Reading the config with nothing in it leaves every setting on the default ReadValues().
+    void ResetToDefaults() {
+        const SwitchFrontend::SwitchPaths paths = s_paths;
+        const std::string cartridge = s_inserted_cartridge;
+        const std::string artic_address = s_artic_base_address;
+        const int launches = launch_count;
+
+        auto loaded = std::move(config);
+        config = std::make_unique<INIReader>("", 0);
+        ReadValues();
+        config = std::move(loaded);
+
+        s_paths = paths;
+        s_inserted_cartridge = cartridge;
+        s_artic_base_address = artic_address;
+        launch_count = launches;
     }
 
 private:
@@ -521,6 +540,21 @@ void SaveConfig() {
     if (s_config) {
         s_config->Save();
     }
+}
+
+void ResetSettings() {
+    if (!s_config) {
+        return;
+    }
+    s_config->ResetToDefaults();
+
+    Common::Log::Filter log_filter;
+    log_filter.ParseFilterString(Settings::values.log_filter.GetValue());
+    Common::Log::SetGlobalFilter(log_filter);
+
+    RequestLayoutUpdate();
+    s_config->Save();
+    LOG_INFO(Config, "Settings reset to defaults");
 }
 
 void Shutdown() {

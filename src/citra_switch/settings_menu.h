@@ -33,6 +33,7 @@ enum class SettingsModal {
     LayoutCycle,
     ControllerMap,
     LogFilter,
+    ResetDefaults,
 };
 
 struct SettingsRow {
