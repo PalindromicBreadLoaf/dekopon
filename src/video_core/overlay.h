@@ -29,6 +29,10 @@ struct OverlayMenuState {
     std::string hint; // Footer help text.
 };
 
+// Clockwise rotation the renderer applies to everything it draws over the game.
+void SetOverlayRotation(u32 degrees);
+u32 GetOverlayRotation();
+
 // Publishes the latest overlay description (called from the input thread).
 void SetOverlayMenuState(const OverlayMenuState& state);
 

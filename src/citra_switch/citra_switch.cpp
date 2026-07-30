@@ -164,11 +164,17 @@ void RunGame(PadState& pad, const std::string& rom) {
                                                                 : state);
 
             if (menu_open && !chord_edge) {
-                const SwitchFrontend::QuickMenuNav nav{
+                const SwitchFrontend::MenuDirections dirs = SwitchFrontend::RotateMenuDirections({
                     .up = (pressed & (HidNpadButton_Up | HidNpadButton_StickLUp)) != 0,
                     .down = (pressed & (HidNpadButton_Down | HidNpadButton_StickLDown)) != 0,
                     .left = (pressed & (HidNpadButton_Left | HidNpadButton_StickLLeft)) != 0,
                     .right = (pressed & (HidNpadButton_Right | HidNpadButton_StickLRight)) != 0,
+                });
+                const SwitchFrontend::QuickMenuNav nav{
+                    .up = dirs.up,
+                    .down = dirs.down,
+                    .left = dirs.left,
+                    .right = dirs.right,
                     .confirm = (pressed & HidNpadButton_A) != 0,
                     .cancel = (pressed & HidNpadButton_B) != 0,
                     .alt = (pressed & HidNpadButton_X) != 0,

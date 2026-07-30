@@ -38,8 +38,18 @@ using u16 = std::uint16_t;
 using u32 = std::uint32_t;
 using u64 = std::uint64_t;
 
-constexpr int kScreenW = 1280;
-constexpr int kScreenH = 720;
+// The panel.
+constexpr int kPanelW = 1280;
+constexpr int kPanelH = 720;
+
+// The canvas the menu lays itself out on.
+int g_screen_w = kPanelW;
+int g_screen_h = kPanelH;
+int g_rotation = 0; // Degrees clockwise.
+
+bool RotatedUpright() {
+    return g_rotation == 90 || g_rotation == 270;
+}
 
 constexpr u32 MakeColor(u8 r, u8 g, u8 b, u8 a = 0xFF) {
     return (u32{a} << 24) | (u32{b} << 16) | (u32{g} << 8) | u32{r};
@@ -60,10 +70,24 @@ constexpr u32 kColHintBar = MakeColor(0x1B, 0x1C, 0x20);
 
 class Canvas {
 public:
-    Canvas() : pixels(static_cast<std::size_t>(kScreenW) * kScreenH) {}
+    Canvas() : pixels(static_cast<std::size_t>(kPanelW) * kPanelH) {}
 
     u32* Data() {
         return pixels.data();
+    }
+
+    int Width() const {
+        return width;
+    }
+
+    int Height() const {
+        return height;
+    }
+
+    void Resize(int w, int h) {
+        width = w;
+        height = h;
+        pixels.assign(static_cast<std::size_t>(w) * h, 0);
     }
 
     void Clear(u32 color) {
@@ -71,11 +95,11 @@ public:
     }
 
     void Blend(int x, int y, u32 color, u8 coverage) {
-        if (x < 0 || y < 0 || x >= kScreenW || y >= kScreenH || coverage == 0) {
+        if (x < 0 || y < 0 || x >= width || y >= height || coverage == 0) {
             return;
         }
         const u32 a = ((color >> 24) & 0xFF) * coverage / 255;
-        u32& dst = pixels[static_cast<std::size_t>(y) * kScreenW + x];
+        u32& dst = pixels[static_cast<std::size_t>(y) * width + x];
         if (a == 0) {
             return;
         }
@@ -94,11 +118,11 @@ public:
 
     void FillRect(int x, int y, int w, int h, u32 color) {
         const int x0 = std::max(0, x), y0 = std::max(0, y);
-        const int x1 = std::min(kScreenW, x + w), y1 = std::min(kScreenH, y + h);
+        const int x1 = std::min(width, x + w), y1 = std::min(height, y + h);
         const u8 alpha = (color >> 24) & 0xFF;
         for (int yy = y0; yy < y1; ++yy) {
             if (alpha >= 0xFF) {
-                std::fill_n(pixels.data() + static_cast<std::size_t>(yy) * kScreenW + x0, x1 - x0,
+                std::fill_n(pixels.data() + static_cast<std::size_t>(yy) * width + x0, x1 - x0,
                             color);
             } else {
                 for (int xx = x0; xx < x1; ++xx) {
@@ -153,8 +177,8 @@ public:
                     ch[i] = top * (1 - fy) + bot * fy;
                 }
                 const int px = dx + ox, py = dy + oy;
-                if (px >= 0 && py >= 0 && px < kScreenW && py < kScreenH) {
-                    pixels[static_cast<std::size_t>(py) * kScreenW + px] = MakeColor(
+                if (px >= 0 && py >= 0 && px < width && py < height) {
+                    pixels[static_cast<std::size_t>(py) * width + px] = MakeColor(
                         static_cast<u8>(ch[0]), static_cast<u8>(ch[1]), static_cast<u8>(ch[2]));
                 }
             }
@@ -163,6 +187,8 @@ public:
 
 private:
     std::vector<u32> pixels;
+    int width = kPanelW;
+    int height = kPanelH;
 };
 
 class Font {
@@ -434,8 +460,13 @@ constexpr int kHeaderH = 64;
 constexpr int kHintH = 44;
 constexpr int kContentX = kRailW;
 constexpr int kContentTop = kHeaderH;
-constexpr int kContentW = kScreenW - kRailW;
-constexpr int kContentBottom = kScreenH - kHintH;
+int ContentW() {
+    return g_screen_w - kRailW;
+}
+
+int ContentBottom() {
+    return g_screen_h - kHintH;
+}
 
 constexpr int kTileW = 196;
 constexpr int kTileH = 170;
@@ -469,6 +500,7 @@ std::string ToLowerAscii(std::string_view s) {
 constexpr int kTabStripTop = kContentTop + 10;
 constexpr int kTabStripH = 34;
 constexpr int kTabPadX = 14;
+constexpr int kTabPadMin = 4;
 constexpr int kTabGap = 6;
 
 struct TabRect {
@@ -485,15 +517,15 @@ std::array<TabRect, NumSettingsPages> SettingsTabRects() {
         rects[i].w = g_font.Measure(SettingsPageName(static_cast<SettingsPage>(i)), 18);
         text += rects[i].w;
     }
-    const int available = kContentW - 48 - (NumSettingsPages - 1) * kTabGap;
-    const int pad = std::clamp((available - text) / (2 * NumSettingsPages), 4, kTabPadX);
+    const int available = ContentW() - 48 - (NumSettingsPages - 1) * kTabGap;
+    const int pad = std::clamp((available - text) / (2 * NumSettingsPages), kTabPadMin, kTabPadX);
 
     int total = 0;
     for (int i = 0; i < NumSettingsPages; ++i) {
         rects[i].w += pad * 2;
         total += rects[i].w + (i > 0 ? kTabGap : 0);
     }
-    int x = kContentX + std::max(24, (kContentW - total) / 2);
+    int x = kContentX + std::max(24, (ContentW() - total) / 2);
     for (int i = 0; i < NumSettingsPages; ++i) {
         rects[i].x = x;
         x += rects[i].w + kTabGap;
@@ -508,9 +540,21 @@ int SettingsTabTextInset(const std::array<TabRect, NumSettingsPages>& rects, int
            2;
 }
 
-std::optional<int> SettingsTabHitTest(int x, int y) {
+bool CompactTabStrip() {
+    int total = (NumSettingsPages - 1) * kTabGap + NumSettingsPages * 2 * kTabPadMin;
+    for (int i = 0; i < NumSettingsPages; ++i) {
+        total += g_font.Measure(SettingsPageName(static_cast<SettingsPage>(i)), 18);
+    }
+    return total > ContentW() - 48;
+}
+
+std::optional<int> SettingsTabHitTest(int x, int y, int active) {
     if (y < kTabStripTop || y >= kTabStripTop + kTabStripH) {
         return std::nullopt;
+    }
+    if (CompactTabStrip()) {
+        const int step = x < kContentX + ContentW() / 2 ? -1 : 1;
+        return (active + step + NumSettingsPages) % NumSettingsPages;
     }
     const auto rects = SettingsTabRects();
     for (int i = 0; i < NumSettingsPages; ++i) {
@@ -580,7 +624,9 @@ enum ArticRow {
 // The folder browser covers the whole screen, rail included.
 constexpr int kBrowseTop = 108;
 constexpr int kBrowseRowH = 44;
-constexpr int kBrowseRows = (kContentBottom - kBrowseTop) / kBrowseRowH;
+int BrowseRows() {
+    return std::max(1, (ContentBottom() - kBrowseTop) / kBrowseRowH);
+}
 
 void DrawListScrollbar(Canvas& c, int track_x, int top, int visible_rows, int row_h, int count,
                        int scroll) {
@@ -593,6 +639,11 @@ void DrawListScrollbar(Canvas& c, int track_x, int top, int visible_rows, int ro
     const int max_scroll = count - visible_rows;
     const int thumb_y = top + (track_h - thumb_h) * scroll / std::max(1, max_scroll);
     c.FillRoundRect(track_x, thumb_y, 4, thumb_h, 2, kColAccent);
+}
+
+// Where a hint row starts.
+int HintX() {
+    return g_screen_w >= kPanelW ? kContentX + 24 : 24;
 }
 
 // Draws a small button chip
@@ -631,7 +682,7 @@ void DrawRailIcon(Canvas& canvas, Tab tab, int cx, int cy, u32 color) {
 }
 
 void DrawRail(Canvas& canvas, Tab active, Tab cursor, bool rail_focused) {
-    canvas.FillRect(0, 0, kRailW, kScreenH, kColRail);
+    canvas.FillRect(0, 0, kRailW, g_screen_h, kColRail);
     // The solid accent pill follows the cursor while the rail is focused.
     const Tab pill = rail_focused ? cursor : active;
     for (int i = 0; i < static_cast<int>(kRailItems.size()); ++i) {
@@ -653,14 +704,14 @@ void DrawRail(Canvas& canvas, Tab active, Tab cursor, bool rail_focused) {
 }
 
 void DrawHeader(Canvas& canvas, std::string_view subtitle) {
-    canvas.FillRect(kContentX, 0, kContentW, kHeaderH, kColBg);
+    canvas.FillRect(kContentX, 0, ContentW(), kHeaderH, kColBg);
     g_font.Draw(canvas, kContentX + 24, CenterBaseline(0, kHeaderH, 28), "Dekopon", 28, kColText);
     if (!subtitle.empty()) {
         const int sw = g_font.Measure(subtitle, 20);
-        g_font.Draw(canvas, kScreenW - 24 - sw, CenterBaseline(0, kHeaderH, 20), subtitle, 20,
+        g_font.Draw(canvas, g_screen_w - 24 - sw, CenterBaseline(0, kHeaderH, 20), subtitle, 20,
                     kColTextDim);
     }
-    canvas.FillRect(kContentX, kHeaderH - 1, kContentW, 1, kColRail);
+    canvas.FillRect(kContentX, kHeaderH - 1, ContentW(), 1, kColRail);
 }
 
 void DrawNotice(Canvas& canvas) {
@@ -670,8 +721,8 @@ void DrawNotice(Canvas& canvas) {
     const int pad = 20;
     const int tw = g_font.Measure(g_notice, 18);
     const int w = tw + pad * 2;
-    const int x = kContentX + (kContentW - w) / 2;
-    const int y = kContentBottom - 52;
+    const int x = kContentX + (ContentW() - w) / 2;
+    const int y = ContentBottom() - 52;
     canvas.FillRoundRect(x, y, w, 36, 10, g_notice_is_error ? kColError : kColAccentDim);
     g_font.Draw(canvas, x + pad, CenterBaseline(y, 36, 18), g_notice, 18, kColText);
 }
@@ -737,17 +788,18 @@ void DrawTile(Canvas& canvas, const GameEntry& game, int x, int y, bool selected
 void DrawEmptyLibrary(Canvas& canvas, const std::string& roms_dir) {
     const char* line1 = "No games found";
     const char* line2 = "Copy .3ds / .cci / .cxi / .3dsx files to";
-    const std::string line3 = g_font.TruncateFront(roms_dir, 18, kContentW - 48);
+    const std::string line3 = g_font.TruncateFront(roms_dir, 18, ContentW() - 48);
     const char* line4 = "or install a .cia from the Install tab";
-    const int cx = kContentX + kContentW / 2;
+    const int cx = kContentX + ContentW() / 2;
+    const int top = (kContentTop + ContentBottom()) / 2 - 70;
     const int w1 = g_font.Measure(line1, 26);
-    g_font.Draw(canvas, cx - w1 / 2, 300, line1, 26, kColText);
+    g_font.Draw(canvas, cx - w1 / 2, top, line1, 26, kColText);
     const int w2 = g_font.Measure(line2, 18);
-    g_font.Draw(canvas, cx - w2 / 2, 336, line2, 18, kColTextDim);
+    g_font.Draw(canvas, cx - w2 / 2, top + 36, line2, 18, kColTextDim);
     const int w3 = g_font.Measure(line3, 18);
-    g_font.Draw(canvas, cx - w3 / 2, 360, line3, 18, kColAccent);
+    g_font.Draw(canvas, cx - w3 / 2, top + 60, line3, 18, kColAccent);
     const int w4 = g_font.Measure(line4, 18);
-    g_font.Draw(canvas, cx - w4 / 2, 390, line4, 18, kColTextDim);
+    g_font.Draw(canvas, cx - w4 / 2, top + 90, line4, 18, kColTextDim);
 }
 
 // Layout of the library grid
@@ -760,12 +812,12 @@ struct Grid {
 
 Grid ComputeGrid() {
     Grid g;
-    const int avail = kContentW - 48;
+    const int avail = ContentW() - 48;
     g.cols = std::max(1, (avail + kTileGap) / (kTileW + kTileGap));
     const int used = g.cols * kTileW + (g.cols - 1) * kTileGap;
     g.start_x = kContentX + 24 + (avail - used) / 2;
     g.top = kContentTop + 20;
-    g.visible_rows = std::max(1, (kContentBottom - g.top) / (kTileH + kTileGap));
+    g.visible_rows = std::max(1, (ContentBottom() - g.top) / (kTileH + kTileGap));
     return g;
 }
 
@@ -875,15 +927,17 @@ u32 KindBadgeColor(TitleKind kind) {
 constexpr int kInstallHeaderH = 40;
 constexpr int kInstallTop = kContentTop + kInstallHeaderH + 8;
 constexpr int kInstallRowH = 46;
-constexpr int kInstallRows = (kContentBottom - kInstallTop) / kInstallRowH;
+int InstallRows() {
+    return std::max(1, (ContentBottom() - kInstallTop) / kInstallRowH);
+}
 
 // Modal panel listing what is installed alongside one library entry.
 void DrawTitleDetails(Canvas& c, const GameEntry& game, const TitleDetails& details) {
-    constexpr int w = 660;
+    const int w = std::min(660, ContentW() - 48);
     constexpr int h = 390;
-    const int x = kContentX + (kContentW - w) / 2;
-    const int y = kContentTop + (kContentBottom - kContentTop - h) / 2;
-    c.FillRect(0, 0, kScreenW, kScreenH, MakeColor(0x10, 0x11, 0x13, 0xC0));
+    const int x = kContentX + (ContentW() - w) / 2;
+    const int y = kContentTop + (ContentBottom() - kContentTop - h) / 2;
+    c.FillRect(0, 0, g_screen_w, g_screen_h, MakeColor(0x10, 0x11, 0x13, 0xC0));
     c.RoundBorder(x, y, w, h, 14, 2, kColBadge, kColSurface);
 
     int ty = y + 22;
@@ -947,11 +1001,13 @@ public:
         pad_state = &pad;
         // Put a frame up before the ROM scan
         EnsureFramebuffer();
+        ApplyRotation();
         DrawLoading();
         Present();
         Rescan();
         while (appletMainLoop()) {
             padUpdate(&pad);
+            ApplyRotation();
             const u64 down = padGetButtonsDown(&pad);
             held = padGetButtons(&pad);
 
@@ -967,10 +1023,13 @@ public:
 
             const HidAnalogStickState ls = padGetStickPos(&pad, 0);
             constexpr int dz = 12000;
-            const u32 nav = repeater.Step(
-                (down & HidNpadButton_Up) || ls.y > dz, (down & HidNpadButton_Down) || ls.y < -dz,
-                (down & HidNpadButton_Left) || ls.x < -dz,
-                (down & HidNpadButton_Right) || ls.x > dz);
+            const MenuDirections dirs = RotateMenuDirections({
+                .up = (down & HidNpadButton_Up) != 0 || ls.y > dz,
+                .down = (down & HidNpadButton_Down) != 0 || ls.y < -dz,
+                .left = (down & HidNpadButton_Left) != 0 || ls.x < -dz,
+                .right = (down & HidNpadButton_Right) != 0 || ls.x > dz,
+            });
+            const u32 nav = repeater.Step(dirs.up, dirs.down, dirs.left, dirs.right);
 
             MenuResult result;
             bool done = false;
@@ -1282,8 +1341,8 @@ private:
         if (nav & DirDown) {
             install_sel = std::min(std::max(0, count - 1), install_sel + 1);
         }
-        install_scroll = std::clamp(install_scroll, std::max(0, install_sel - kInstallRows + 1),
-                                    std::max(0, std::min(install_sel, count - kInstallRows)));
+        install_scroll = std::clamp(install_scroll, std::max(0, install_sel - InstallRows() + 1),
+                                    std::max(0, std::min(install_sel, count - InstallRows())));
         if (down & HidNpadButton_A) {
             const int base = InstallParentRows();
             const int di = install_sel - base;
@@ -1396,7 +1455,7 @@ private:
     void ScrollSettingsIntoView() {
         int& scroll = SettingsScroll();
         const int sel = SettingsSel();
-        scroll = std::clamp(scroll, std::max(0, sel - kSettingsVisibleRows + 1), sel);
+        scroll = std::clamp(scroll, std::max(0, sel - SettingsVisibleRows() + 1), sel);
     }
 
     void OpenLayoutPicker() {
@@ -1507,8 +1566,8 @@ private:
     }
 
     void ScrollRemapIntoView() {
-        remap_scroll = std::clamp(remap_scroll, std::max(0, remap_sel - kRemapVisibleRows + 1),
-                                  remap_sel);
+        remap_scroll =
+            std::clamp(remap_scroll, std::max(0, remap_sel - RemapVisibleRows() + 1), remap_sel);
     }
 
     // Cycles the physical Switch button bound to `control` by `dir`.
@@ -1714,8 +1773,27 @@ private:
             touch_was_down = false;
             return;
         }
-        const int tx = static_cast<int>(ts.touches[0].x);
-        const int ty = static_cast<int>(ts.touches[0].y);
+        // The panel is never rotated, so a contact has to be turned onto the canvas.
+        const int px = static_cast<int>(ts.touches[0].x);
+        const int py = static_cast<int>(ts.touches[0].y);
+        int tx = px;
+        int ty = py;
+        switch (g_rotation) {
+        case 90:
+            tx = py;
+            ty = g_screen_h - 1 - px;
+            break;
+        case 180:
+            tx = g_screen_w - 1 - px;
+            ty = g_screen_h - 1 - py;
+            break;
+        case 270:
+            tx = g_screen_w - 1 - py;
+            ty = px;
+            break;
+        default:
+            break;
+        }
         if (touch_was_down) {
             return; // Act on the initial contact only.
         }
@@ -1748,23 +1826,24 @@ private:
             }
         } else if (tab == Tab::Install) {
             const int row = install_scroll + (ty - kInstallTop) / kInstallRowH;
-            if (ty >= kInstallTop && ty < kContentBottom && row < InstallRowCount()) {
+            if (ty >= kInstallTop && ty < ContentBottom() && row < InstallRowCount()) {
                 install_sel = row;
             }
         } else if (tab == Tab::Settings) {
-            if (const std::optional<int> page = SettingsTabHitTest(tx, ty)) {
+            if (const std::optional<int> page =
+                    SettingsTabHitTest(tx, ty, static_cast<int>(settings_page))) {
                 SetSettingsPage(static_cast<SettingsPage>(*page));
                 return;
             }
             const int visible = (ty - kSettingsTop) / kSettingsRowStride;
             const int row = SettingsScroll() + visible;
-            if (ty >= kSettingsTop && visible < kSettingsVisibleRows && row >= 0 &&
+            if (ty >= kSettingsTop && visible < SettingsVisibleRows() && row >= 0 &&
                 row < static_cast<int>(settings_rows.size())) {
                 SettingsSel() = row;
                 if (settings_rows[row].modal != SettingsModal::None) {
                     OpenSettingsModal(settings_rows[row].modal);
                 } else {
-                    settings_rows[row].step(tx > kContentX + kContentW / 2 ? +1 : -1);
+                    settings_rows[row].step(tx > kContentX + ContentW() / 2 ? +1 : -1);
                     settings_dirty = true;
                 }
             }
@@ -1855,8 +1934,8 @@ private:
             if (nav & DirDown) {
                 sel = std::min(std::max(0, count - 1), sel + 1);
             }
-            scroll = std::clamp(scroll, std::max(0, sel - kBrowseRows + 1),
-                                std::max(0, std::min(sel, count - kBrowseRows)));
+            scroll = std::clamp(scroll, std::max(0, sel - BrowseRows() + 1),
+                                std::max(0, std::min(sel, count - BrowseRows())));
             if (down & HidNpadButton_A) {
                 if (base == 1 && sel == 0) {
                     Enter(parent, dir);
@@ -1889,8 +1968,8 @@ private:
         c.Clear(kColBg);
 
         g_font.Draw(c, 40, 44, "Select folder", 28, kColText);
-        g_font.Draw(c, 40, 76, g_font.TruncateFront(dir, 20, kScreenW - 80), 20, kColAccent);
-        c.FillRect(40, 96, kScreenW - 80, 1, kColRail);
+        g_font.Draw(c, 40, 76, g_font.TruncateFront(dir, 20, g_screen_w - 80), 20, kColAccent);
+        c.FillRect(40, 96, g_screen_w - 80, 1, kColRail);
 
         const bool has_parent = !ParentDirectory(dir).empty();
         const int base = has_parent ? 1 : 0;
@@ -1899,23 +1978,24 @@ private:
         if (count == 0) {
             g_font.Draw(c, 52, kBrowseTop + 30, "No subfolders here", 20, kColTextDim);
         }
-        for (int i = scroll; i < std::min(count, scroll + kBrowseRows); ++i) {
+        for (int i = scroll; i < std::min(count, scroll + BrowseRows()); ++i) {
             const int y = kBrowseTop + (i - scroll) * kBrowseRowH;
             if (i == sel) {
-                c.FillRoundRect(32, y, kScreenW - 64, kBrowseRowH - 4, 8, kColSurfaceHi);
+                c.FillRoundRect(32, y, g_screen_w - 64, kBrowseRowH - 4, 8, kColSurfaceHi);
                 c.FillRoundRect(32, y + 8, 4, kBrowseRowH - 20, 2, kColAccent);
             }
             const bool up = has_parent && i == 0;
             const std::string name = up ? ".." : entries[i - base].name + "/";
             g_font.Draw(c, 52, CenterBaseline(y, kBrowseRowH - 4, 20),
-                        g_font.Truncate(name, 20, kScreenW - 128), 20, up ? kColTextDim : kColText);
+                        g_font.Truncate(name, 20, g_screen_w - 128), 20,
+                        up ? kColTextDim : kColText);
         }
-        DrawListScrollbar(c, kScreenW - 20, kBrowseTop, kBrowseRows, kBrowseRowH, count, scroll);
+        DrawListScrollbar(c, g_screen_w - 20, kBrowseTop, BrowseRows(), kBrowseRowH, count, scroll);
 
-        c.FillRect(0, kContentBottom, kScreenW, kHintH, kColHintBar);
-        c.FillRect(0, kContentBottom, kScreenW, 1, kColRail);
+        c.FillRect(0, ContentBottom(), g_screen_w, kHintH, kColHintBar);
+        c.FillRect(0, ContentBottom(), g_screen_w, 1, kColRail);
         int hx = 40;
-        const int hy = kContentBottom + (kHintH - 26) / 2;
+        const int hy = ContentBottom() + (kHintH - 26) / 2;
         hx += DrawHint(c, hx, hy, "A", "Open") + 22;
         hx += DrawHint(c, hx, hy, "B", has_parent ? "Up" : "Cancel") + 22;
         hx += DrawHint(c, hx, hy, "+", "Select this folder") + 22;
@@ -1926,7 +2006,7 @@ private:
         DrawHeader(c, "");
         const bool content_focus = focus == Focus::Content;
         const int x = kContentX + 24;
-        const int w = kContentW - 48;
+        const int w = ContentW() - 48;
         for (int i = 0; i < PathRowCount; ++i) {
             const int y = PathRowTop(i);
             const int h = PathRowHeight(i);
@@ -1958,8 +2038,8 @@ private:
         if (focus == Focus::Rail) {
             DrawRailHints(c);
         } else {
-            int hx = kContentX + 24;
-            const int hy = kContentBottom + (kHintH - 26) / 2;
+            int hx = HintX();
+            const int hy = ContentBottom() + (kHintH - 26) / 2;
             hx +=
                 DrawHint(c, hx, hy, "A", paths_sel == PathRowRecursive ? "Toggle" : "Browse") + 22;
             hx += DrawHint(c, hx, hy, "Y", "Default") + 22;
@@ -1972,7 +2052,7 @@ private:
         DrawHeader(c, "3DS connectivity");
         const bool content_focus = focus == Focus::Content;
         const int x = kContentX + 24;
-        const int w = kContentW - 48;
+        const int w = ContentW() - 48;
 
         g_font.Draw(c, x + 12, kContentTop + 30,
                     "Run Artic Base or Azahar Artic Setup Tool on a 3DS on this network.", 18,
@@ -2026,7 +2106,7 @@ private:
             g_font.Draw(c, x + 20, y + 52, g_font.Truncate(value, 17, w - 44), 17, value_color);
         }
 
-        g_font.Draw(c, x + 12, kContentBottom - 30,
+        g_font.Draw(c, x + 12, ContentBottom() - 30,
                     "System setup installs unique console data. Keep your Dekopon folder private.",
                     16, kColTextDim);
 
@@ -2043,8 +2123,8 @@ private:
             } else if (artic_sel == ArticRowController) {
                 action = "Toggle";
             }
-            int hx = kContentX + 24;
-            const int hy = kContentBottom + (kHintH - 26) / 2;
+            int hx = HintX();
+            const int hy = ContentBottom() + (kHintH - 26) / 2;
             hx += DrawHint(c, hx, hy, "A", action) + 22;
             hx += DrawHint(c, hx, hy, "B", "Menu") + 22;
             DrawHint(c, hx, hy, "+ -", "Exit");
@@ -2052,11 +2132,11 @@ private:
     }
 
     void DrawArticSetupConfirm(Canvas& c, bool old3ds, bool replacing) {
-        constexpr int w = 760;
+        const int w = std::min(760, g_screen_w - 48);
         constexpr int h = 326;
-        const int x = (kScreenW - w) / 2;
-        const int y = (kScreenH - h) / 2;
-        c.FillRect(0, 0, kScreenW, kScreenH, MakeColor(0x10, 0x11, 0x13, 0xC0));
+        const int x = (g_screen_w - w) / 2;
+        const int y = (g_screen_h - h) / 2;
+        c.FillRect(0, 0, g_screen_w, g_screen_h, MakeColor(0x10, 0x11, 0x13, 0xC0));
         c.RoundBorder(x, y, w, h, 14, 2, kColBadge, kColSurface);
 
         const std::string title =
@@ -2120,7 +2200,7 @@ private:
         DrawHeader(c, std::to_string(count_cias) + (count_cias == 1 ? " CIA" : " CIAs"));
         const bool content_focus = focus == Focus::Content;
         const int x = kContentX + 24;
-        const int w = kContentW - 48;
+        const int w = ContentW() - 48;
         g_font.Draw(c, x, kContentTop + 26, g_font.TruncateFront(install_dir, 18, w), 18,
                     kColAccent);
         c.FillRect(x, kContentTop + kInstallHeaderH, w, 1, kColRail);
@@ -2130,7 +2210,7 @@ private:
             g_font.Draw(c, x + 20, kInstallTop + 30, "No CIAs or subfolders here", 20, kColTextDim);
         }
         const int base = InstallParentRows();
-        for (int i = install_scroll; i < std::min(count, install_scroll + kInstallRows); ++i) {
+        for (int i = install_scroll; i < std::min(count, install_scroll + InstallRows()); ++i) {
             const int y = kInstallTop + (i - install_scroll) * kInstallRowH;
             if (i == install_sel) {
                 c.FillRoundRect(x, y, w, kInstallRowH - 4, 8,
@@ -2151,15 +2231,15 @@ private:
             }
             DrawCiaRow(c, install_cias[di - static_cast<int>(install_dirs.size())], x, y, w);
         }
-        DrawListScrollbar(c, kScreenW - 10, kInstallTop, kInstallRows, kInstallRowH, count,
+        DrawListScrollbar(c, g_screen_w - 10, kInstallTop, InstallRows(), kInstallRowH, count,
                           install_scroll);
 
         if (focus == Focus::Rail) {
             DrawRailHints(c);
             return;
         }
-        int hx = kContentX + 24;
-        const int hy = kContentBottom + (kHintH - 26) / 2;
+        int hx = HintX();
+        const int hy = ContentBottom() + (kHintH - 26) / 2;
         hx += DrawHint(c, hx, hy, "A", SelectedCia() ? "Install" : "Open") + 22;
         hx += DrawHint(c, hx, hy, "B", "Menu") + 22;
         hx += DrawHint(c, hx, hy, "Y", "Refresh") + 22;
@@ -2199,11 +2279,11 @@ private:
     }
 
     void DrawConfirmInstall(Canvas& c, const CiaEntry& cia, bool replacing, u16 installed_version) {
-        constexpr int w = 620;
+        const int w = std::min(620, g_screen_w - 48);
         constexpr int h = 268;
-        const int x = (kScreenW - w) / 2;
-        const int y = (kScreenH - h) / 2;
-        c.FillRect(0, 0, kScreenW, kScreenH, MakeColor(0x10, 0x11, 0x13, 0xC0));
+        const int x = (g_screen_w - w) / 2;
+        const int y = (g_screen_h - h) / 2;
+        c.FillRect(0, 0, g_screen_w, g_screen_h, MakeColor(0x10, 0x11, 0x13, 0xC0));
         c.RoundBorder(x, y, w, h, 14, 2, kColBadge, kColSurface);
 
         int ty = y + 20;
@@ -2235,11 +2315,11 @@ private:
     void DrawInstallProgress(Canvas& c) {
         const std::size_t written = install_written.load();
         const std::size_t total = install_total.load();
-        constexpr int w = 560;
+        const int w = std::min(560, g_screen_w - 48);
         constexpr int h = 136;
-        const int x = (kScreenW - w) / 2;
-        const int y = (kScreenH - h) / 2;
-        c.FillRect(0, 0, kScreenW, kScreenH, MakeColor(0x10, 0x11, 0x13, 0xC0));
+        const int x = (g_screen_w - w) / 2;
+        const int y = (g_screen_h - h) / 2;
+        c.FillRect(0, 0, g_screen_w, g_screen_h, MakeColor(0x10, 0x11, 0x13, 0xC0));
         c.RoundBorder(x, y, w, h, 14, 2, kColBadge, kColSurface);
         g_font.Draw(c, x + 24, y + 42, g_font.Truncate("Installing " + install_name, 20, w - 48),
                     20, kColText);
@@ -2283,8 +2363,8 @@ private:
         if (focus == Focus::Rail) {
             DrawRailHints(c);
         } else {
-            int hx = kContentX + 24;
-            const int hy = kContentBottom + (kHintH - 26) / 2;
+            int hx = HintX();
+            const int hy = ContentBottom() + (kHintH - 26) / 2;
             hx += DrawHint(c, hx, hy, "A", "Launch") + 22;
             hx += DrawHint(c, hx, hy, "B", "Menu") + 22;
             hx += DrawHint(c, hx, hy, "X", "Search") + 22;
@@ -2300,7 +2380,7 @@ private:
             return;
         }
         const int track_h = grid.visible_rows * (kTileH + kTileGap) - kTileGap;
-        const int track_x = kScreenW - 10;
+        const int track_x = g_screen_w - 10;
         c.FillRoundRect(track_x, grid.top, 4, track_h, 2, kColRail);
         const int thumb_h = std::max(24, track_h * grid.visible_rows / total_rows);
         const int max_scroll = total_rows - grid.visible_rows;
@@ -2314,20 +2394,42 @@ private:
     static constexpr int kSettingsTop = kTabStripTop + kTabStripH + 12;
     static constexpr int kSettingsRowStride = kRowH + 8;
     static constexpr int kSettingsFooterH = 52;
-    static constexpr int kSettingsVisibleRows =
-        (kContentBottom - kSettingsTop - kSettingsFooterH) / kSettingsRowStride;
+
+    static int SettingsVisibleRows() {
+        return std::max(1,
+                        (ContentBottom() - kSettingsTop - kSettingsFooterH) / kSettingsRowStride);
+    }
 
     // The controller-mapping modal covers most of the screen and scrolls its own list.
-    static constexpr int kRemapW = 860;
     static constexpr int kRemapRowH = 42;
     static constexpr int kRemapTopPad = 92;    // Room for the title.
     static constexpr int kRemapBottomPad = 56; // Room for the button hints.
     static constexpr int kRemapPanelY = 44;
-    static constexpr int kRemapPanelH = kScreenH - 2 * kRemapPanelY;
-    static constexpr int kRemapVisibleRows =
-        (kRemapPanelH - kRemapTopPad - kRemapBottomPad) / kRemapRowH;
+
+    static int RemapW() {
+        return std::min(860, g_screen_w - 48);
+    }
+
+    static int RemapPanelH() {
+        return g_screen_h - 2 * kRemapPanelY;
+    }
+
+    static int RemapVisibleRows() {
+        return std::max(1, (RemapPanelH() - kRemapTopPad - kRemapBottomPad) / kRemapRowH);
+    }
 
     void DrawSettingsTabs(Canvas& c) {
+        if (CompactTabStrip()) {
+            const char* name = SettingsPageName(settings_page);
+            const int baseline = CenterBaseline(kTabStripTop, kTabStripH, 18);
+            const int w = g_font.Measure(name, 18) + kTabPadX * 2;
+            const int x = kContentX + (ContentW() - w) / 2;
+            c.FillRoundRect(x, kTabStripTop, w, kTabStripH, kTabStripH / 2, kColAccent);
+            g_font.Draw(c, x + kTabPadX, baseline, name, 18, kColOnAccent);
+            g_font.Draw(c, x - 24, baseline, "<", 18, kColTextDim);
+            g_font.Draw(c, x + w + 14, baseline, ">", 18, kColTextDim);
+            return;
+        }
         const auto rects = SettingsTabRects();
         for (int i = 0; i < NumSettingsPages; ++i) {
             const bool on = i == static_cast<int>(settings_page);
@@ -2351,8 +2453,8 @@ private:
         const int sel = SettingsSel();
         const int scroll = SettingsScroll();
         const int x = kContentX + 24;
-        const int w = kContentW - 48;
-        const int last = std::min(count, scroll + kSettingsVisibleRows);
+        const int w = ContentW() - 48;
+        const int last = std::min(count, scroll + SettingsVisibleRows());
         for (int i = scroll; i < last; ++i) {
             const int y = kSettingsTop + (i - scroll) * kSettingsRowStride;
             const bool on = i == sel;
@@ -2370,10 +2472,10 @@ private:
             g_font.Draw(c, x + w - 24 - vw, CenterBaseline(y, kRowH, 22), shown, 22,
                         on && content_focus ? kColAccent : kColTextDim);
         }
-        DrawListScrollbar(c, kScreenW - 20, kSettingsTop, kSettingsVisibleRows, kSettingsRowStride,
-                          count, scroll);
+        DrawListScrollbar(c, g_screen_w - 20, kSettingsTop, SettingsVisibleRows(),
+                          kSettingsRowStride, count, scroll);
 
-        const int footer_y = kContentBottom - kSettingsFooterH;
+        const int footer_y = ContentBottom() - kSettingsFooterH;
         const std::string backend =
             std::string{"Graphics backend: "} + ActiveGraphicsBackendName();
         g_font.Draw(c, x + 20, footer_y + 16, backend, 18, kColTextDim);
@@ -2383,8 +2485,8 @@ private:
         if (focus == Focus::Rail) {
             DrawRailHints(c);
         } else {
-            int hx = kContentX + 24;
-            const int hy = kContentBottom + (kHintH - 26) / 2;
+            int hx = HintX();
+            const int hy = ContentBottom() + (kHintH - 26) / 2;
             const bool modal = count > 0 && settings_rows[sel].modal != SettingsModal::None;
             if (modal) {
                 hx += DrawHint(c, hx, hy, "A", "Configure") + 22;
@@ -2401,14 +2503,14 @@ private:
     // A centred modal to choose which layouts R3 cycles through in-game.
     void DrawLayoutPicker(Canvas& c) {
         const int count = GetScreenLayoutCount();
-        constexpr int w = 620;
+        const int w = std::min(620, g_screen_w - 48);
         constexpr int row_h = 44;
         constexpr int top_pad = 78;    // Room for the title and subtitle.
         constexpr int bottom_pad = 56; // Room for the button hints.
         const int h = top_pad + count * row_h + bottom_pad;
-        const int x = (kScreenW - w) / 2;
-        const int y = (kScreenH - h) / 2;
-        c.FillRect(0, 0, kScreenW, kScreenH, MakeColor(0x10, 0x11, 0x13, 0xC0));
+        const int x = (g_screen_w - w) / 2;
+        const int y = (g_screen_h - h) / 2;
+        c.FillRect(0, 0, g_screen_w, g_screen_h, MakeColor(0x10, 0x11, 0x13, 0xC0));
         c.RoundBorder(x, y, w, h, 14, 2, kColBadge, kColSurface);
 
         g_font.Draw(c, x + 24, y + 40, "R3 Screen Layouts", 24, kColText);
@@ -2440,11 +2542,11 @@ private:
 
     // A near-fullscreen modal that allows rebinding inputs.
     void DrawRemapPage(Canvas& c) {
-        const int x = (kScreenW - kRemapW) / 2;
+        const int x = (g_screen_w - RemapW()) / 2;
         const int y = kRemapPanelY;
-        const int w = kRemapW;
-        const int h = kRemapPanelH;
-        c.FillRect(0, 0, kScreenW, kScreenH, MakeColor(0x10, 0x11, 0x13, 0xC0));
+        const int w = RemapW();
+        const int h = RemapPanelH();
+        c.FillRect(0, 0, g_screen_w, g_screen_h, MakeColor(0x10, 0x11, 0x13, 0xC0));
         c.RoundBorder(x, y, w, h, 14, 2, kColBadge, kColSurface);
 
         g_font.Draw(c, x + 24, y + 40, "Controller Mapping", 24, kColText);
@@ -2455,7 +2557,7 @@ private:
         const int list_top = y + kRemapTopPad;
         const int rx = x + 16;
         const int rw = w - 32;
-        const int last = std::min(NumMappableControls, remap_scroll + kRemapVisibleRows);
+        const int last = std::min(NumMappableControls, remap_scroll + RemapVisibleRows());
         for (int i = remap_scroll; i < last; ++i) {
             const int ry = list_top + (i - remap_scroll) * kRemapRowH;
             const bool on = i == remap_sel;
@@ -2471,7 +2573,7 @@ private:
             g_font.Draw(c, rx + rw - 24 - vw, CenterBaseline(ry, kRemapRowH - 4, 20), value, 20,
                         on ? kColAccent : kColTextDim);
         }
-        DrawListScrollbar(c, x + w - 12, list_top, kRemapVisibleRows, kRemapRowH,
+        DrawListScrollbar(c, x + w - 12, list_top, RemapVisibleRows(), kRemapRowH,
                           NumMappableControls, remap_scroll);
 
         int hx = x + 24;
@@ -2484,14 +2586,14 @@ private:
     }
 
     void DrawHintBar(Canvas& c) {
-        c.FillRect(0, kContentBottom, kScreenW, kHintH, kColHintBar);
-        c.FillRect(0, kContentBottom, kScreenW, 1, kColRail);
+        c.FillRect(0, ContentBottom(), g_screen_w, kHintH, kColHintBar);
+        c.FillRect(0, ContentBottom(), g_screen_w, 1, kColRail);
     }
 
     // Legend shown while the cursor sits on the Library/Settings rail.
     void DrawRailHints(Canvas& c) {
-        int hx = kContentX + 24;
-        const int hy = kContentBottom + (kHintH - 26) / 2;
+        int hx = HintX();
+        const int hy = ContentBottom() + (kHintH - 26) / 2;
         hx += DrawHint(c, hx, hy, "^v", "Move") + 22;
         hx += DrawHint(c, hx, hy, "A", "Open") + 22;
         hx += DrawHint(c, hx, hy, "B", "Back") + 22;
@@ -2501,10 +2603,10 @@ private:
     // Full-frame busy indicator for the brief blocking scans.
     void ShowBusy(std::string_view msg) {
         Draw();
-        canvas.FillRect(0, 0, kScreenW, kScreenH, MakeColor(0x10, 0x11, 0x13, 0xB0));
+        canvas.FillRect(0, 0, g_screen_w, g_screen_h, MakeColor(0x10, 0x11, 0x13, 0xB0));
         const int tw = g_font.Measure(msg, 22);
         const int w = tw + 56, h = 56;
-        const int x = (kScreenW - w) / 2, y = (kScreenH - h) / 2;
+        const int x = (g_screen_w - w) / 2, y = (g_screen_h - h) / 2;
         canvas.FillRoundRect(x, y, w, h, 12, kColSurfaceHi);
         g_font.Draw(canvas, x + 28, CenterBaseline(y, h, 22), msg, 22, kColText);
         Present();
@@ -2514,26 +2616,84 @@ private:
         if (fb_ready) {
             return;
         }
-        framebufferCreate(&fb, nwindowGetDefault(), kScreenW, kScreenH, PIXEL_FORMAT_RGBA_8888, 2);
+        framebufferCreate(&fb, nwindowGetDefault(), kPanelW, kPanelH, PIXEL_FORMAT_RGBA_8888, 2);
         framebufferMakeLinear(&fb);
         fb_ready = true;
+    }
+
+    // Picks up a rotation changed from the Settings tab and resizes the canvas to match.
+    void ApplyRotation() {
+        const int rotation = GetMenuRotation();
+        if (rotation == g_rotation && canvas.Width() == g_screen_w) {
+            return;
+        }
+        g_rotation = rotation;
+        g_screen_w = RotatedUpright() ? kPanelH : kPanelW;
+        g_screen_h = RotatedUpright() ? kPanelW : kPanelH;
+        canvas.Resize(g_screen_w, g_screen_h);
+        ScrollSelectionsIntoView();
+    }
+
+    void ScrollSelectionsIntoView() {
+        EnsureVisible(ComputeGrid());
+        ScrollSettingsIntoView();
+        ScrollRemapIntoView();
     }
 
     void DrawLoading() {
         canvas.Clear(kColBg);
         const char* msg = "Loading library...";
         const int w = g_font.Measure(msg, 24);
-        g_font.Draw(canvas, kContentX + (kContentW - w) / 2, kScreenH / 2, msg, 24, kColTextDim);
+        g_font.Draw(canvas, kContentX + (ContentW() - w) / 2, g_screen_h / 2, msg, 24, kColTextDim);
     }
 
+    // Turns the canvas back onto the panel.
     void Present() {
         EnsureFramebuffer();
-        u32 stride = 0;
-        auto* base = static_cast<u8*>(framebufferBegin(&fb, &stride));
+        u32 pitch = 0;
+        auto* base = static_cast<u8*>(framebufferBegin(&fb, &pitch));
+        auto* dst = reinterpret_cast<u32*>(base);
+        const int stride = static_cast<int>(pitch / sizeof(u32));
         const u32* src = canvas.Data();
-        for (int y = 0; y < kScreenH; ++y) {
-            std::memcpy(base + static_cast<std::size_t>(y) * stride, src + y * kScreenW,
-                        static_cast<std::size_t>(kScreenW) * 4);
+        const int cw = canvas.Width();
+        const int ch = canvas.Height();
+        constexpr int kTile = 32;
+        switch (g_rotation) {
+        case 90:
+            for (int y0 = 0; y0 < ch; y0 += kTile) {
+                for (int x0 = 0; x0 < cw; x0 += kTile) {
+                    for (int y = y0, ymax = std::min(y0 + kTile, ch); y < ymax; ++y) {
+                        for (int x = x0, xmax = std::min(x0 + kTile, cw); x < xmax; ++x) {
+                            dst[x * stride + (ch - 1 - y)] = src[y * cw + x];
+                        }
+                    }
+                }
+            }
+            break;
+        case 180:
+            for (int y = 0; y < ch; ++y) {
+                u32* row = dst + (ch - 1 - y) * stride;
+                for (int x = 0; x < cw; ++x) {
+                    row[cw - 1 - x] = src[y * cw + x];
+                }
+            }
+            break;
+        case 270:
+            for (int y0 = 0; y0 < ch; y0 += kTile) {
+                for (int x0 = 0; x0 < cw; x0 += kTile) {
+                    for (int y = y0, ymax = std::min(y0 + kTile, ch); y < ymax; ++y) {
+                        for (int x = x0, xmax = std::min(x0 + kTile, cw); x < xmax; ++x) {
+                            dst[(cw - 1 - x) * stride + y] = src[y * cw + x];
+                        }
+                    }
+                }
+            }
+            break;
+        default:
+            for (int y = 0; y < ch; ++y) {
+                std::memcpy(dst + y * stride, src + y * cw, static_cast<std::size_t>(cw) * 4);
+            }
+            break;
         }
         framebufferEnd(&fb);
     }

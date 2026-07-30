@@ -325,6 +325,15 @@ SettingsRow PauseInQuickMenuRow() {
     return BoolRow("Pause In Quick Menu", IsPauseInQuickMenu, SetPauseInQuickMenu);
 }
 
+SettingsRow MenuRotationRow() {
+    return {"Menu Rotation", [] { return std::to_string(GetMenuRotation()) + " deg"; },
+            [](int dir) { SetMenuRotation(std::clamp(GetMenuRotation() / 90 + dir, 0, 3) * 90); }};
+}
+
+SettingsRow MenuInputRotationRow() {
+    return BoolRow("Rotate Menu Input", IsMenuInputRotated, SetMenuInputRotated);
+}
+
 SettingsRow MovieThrottleClockRow() {
     return {"Movie CPU Clock",
             [] { return std::to_string(GetMovieThrottleClockPercentage()) + "%"; },
@@ -535,6 +544,8 @@ std::vector<SettingsRow> BuildSettingsPage(SettingsPage page) {
         };
     case SettingsPage::Layout:
         return {
+            MenuRotationRow(),
+            MenuInputRotationRow(),
             StretchFullscreenRow(),
             Number("Screen Gap", v.screen_gap, 0, 200, 4, " px"),
             LargeScreenProportionRow(),
@@ -628,6 +639,8 @@ std::vector<SettingsRow> BuildQuickPage(QuickPage page) {
             rows.push_back(OverlayOpacityRow());
         }
         rows.push_back(StretchFullscreenRow());
+        rows.push_back(MenuRotationRow());
+        rows.push_back(MenuInputRotationRow());
         rows.push_back(Toggle("FPS Counter", v.show_fps));
         rows.push_back(Toggle("Shader Compile Notice", v.show_shader_compile_notice));
         return rows;

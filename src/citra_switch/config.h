@@ -50,6 +50,24 @@ void PrepareSystemFileSetup(SystemFileSetupMode mode);
 bool GetUseArticBaseController();
 void SetUseArticBaseController(bool enabled);
 
+// Clockwise rotation of the launcher and the in-game overlay, in degrees.
+int GetMenuRotation();
+void SetMenuRotation(int degrees);
+
+// Whether the d-pad turns with the menu.
+bool IsMenuInputRotated();
+void SetMenuInputRotated(bool enabled);
+
+struct MenuDirections {
+    bool up{};
+    bool down{};
+    bool left{};
+    bool right{};
+};
+
+// Maps pressed d-pad directions onto the rotated menu.
+MenuDirections RotateMenuDirections(MenuDirections pressed);
+
 // The dekopon directory this session actually booted from.
 const std::string& GetActiveUserDir();
 

@@ -1527,11 +1527,33 @@ void RendererVulkan::DrawCursor(const Layout::FramebufferLayout& layout) {
 }
 
 namespace {
-// Builds overlay geometry in output-pixel coordinates, emitting position + atlas-UV vertices.
+struct OverlayCanvas {
+    float width;
+    float height;
+    u32 rotation; // Degrees clockwise.
+
+    // Font sizes key off the short edge so text keeps its size when the canvas turns.
+    float ShortEdge() const {
+        return std::min(width, height);
+    }
+};
+
+OverlayCanvas MakeOverlayCanvas(const Layout::FramebufferLayout& layout) {
+    const u32 rotation = VideoCore::GetOverlayRotation();
+    const bool upright = rotation == 90 || rotation == 270;
+    return {static_cast<float>(upright ? layout.height : layout.width),
+            static_cast<float>(upright ? layout.width : layout.height), rotation};
+}
+
+// Builds overlay geometry in canvas pixels.
 class OverlayBuilder {
 public:
-    OverlayBuilder(std::vector<float>& verts, float width, float height)
-        : verts{verts}, inv_w{2.0f / width}, inv_h{2.0f / height} {}
+    OverlayBuilder(std::vector<float>& verts, const OverlayCanvas& canvas)
+        : verts{verts}, canvas{canvas} {
+        const bool upright = canvas.rotation == 90 || canvas.rotation == 270;
+        inv_w = 2.0f / (upright ? canvas.height : canvas.width);
+        inv_h = 2.0f / (upright ? canvas.width : canvas.height);
+    }
 
     u32 VertexCount() const {
         return static_cast<u32>(verts.size() / kFloatsPerVertex);
@@ -1569,17 +1591,46 @@ private:
     static constexpr int kFloatsPerVertex = 4;
 
     void PushQuad(float x0, float y0, float x1, float y1, float u0, float v0, float u1, float v1) {
-        const float l = x0 * inv_w - 1.0f;
-        const float r = x1 * inv_w - 1.0f;
-        const float t = y0 * inv_h - 1.0f;
-        const float b = y1 * inv_h - 1.0f;
-        verts.insert(verts.end(), {
-                                      l, t, u0, v0, r, t, u1, v0, r, b, u1, v1,
-                                      l, t, u0, v0, r, b, u1, v1, l, b, u0, v1,
-                                  });
+        const std::array<float, 2> tl = Project(x0, y0);
+        const std::array<float, 2> tr = Project(x1, y0);
+        const std::array<float, 2> br = Project(x1, y1);
+        const std::array<float, 2> bl = Project(x0, y1);
+        const auto push = [this](const std::array<float, 2>& p, float u, float v) {
+            verts.insert(verts.end(), {p[0], p[1], u, v});
+        };
+        push(tl, u0, v0);
+        push(tr, u1, v0);
+        push(br, u1, v1);
+        push(tl, u0, v0);
+        push(br, u1, v1);
+        push(bl, u0, v1);
+    }
+
+    // Canvas pixels to clip space.
+    std::array<float, 2> Project(float x, float y) const {
+        float px = x;
+        float py = y;
+        switch (canvas.rotation) {
+        case 90:
+            px = canvas.height - y;
+            py = x;
+            break;
+        case 180:
+            px = canvas.width - x;
+            py = canvas.height - y;
+            break;
+        case 270:
+            px = y;
+            py = canvas.width - x;
+            break;
+        default:
+            break;
+        }
+        return {px * inv_w - 1.0f, py * inv_h - 1.0f};
     }
 
     std::vector<float>& verts;
+    OverlayCanvas canvas;
     float inv_w;
     float inv_h;
 };
@@ -1607,14 +1658,15 @@ RendererVulkan::OverlayDraw RendererVulkan::PrepareFpsOverlay(
     const int fps = std::clamp(static_cast<int>(std::lround(overlay_game_fps)), 0, 999);
     std::snprintf(text, sizeof(text), "FPS %d", fps);
 
-    const float w = static_cast<float>(layout.width);
-    const float h = static_cast<float>(layout.height);
+    const OverlayCanvas canvas = MakeOverlayCanvas(layout);
+    const float w = canvas.width;
+    const float h = canvas.height;
     if (w <= 0.0f || h <= 0.0f) {
         return {};
     }
 
     // Font em size scaled to the output so the counter stays a consistent size everywhere.
-    const float em = std::max(14.0f, std::round(h / 32.0f));
+    const float em = std::max(14.0f, std::round(canvas.ShortEdge() / 32.0f));
     const float scale = em / OverlayFont::kBakePixelHeight;
     const float margin = std::round(em * 0.6f);
     const float pad = std::round(em * 0.35f);
@@ -1632,7 +1684,7 @@ RendererVulkan::OverlayDraw RendererVulkan::PrepareFpsOverlay(
 
     std::vector<float> verts;
     verts.reserve(256);
-    OverlayBuilder builder{verts, w, h};
+    OverlayBuilder builder{verts, canvas};
 
     const float text_w = OverlayBuilder::Measure(text, scale);
 
@@ -1681,13 +1733,14 @@ RendererVulkan::OverlayDraw RendererVulkan::PrepareShaderNotice(
         std::snprintf(text, sizeof(text), "Compiling shaders");
     }
 
-    const float w = static_cast<float>(layout.width);
-    const float h = static_cast<float>(layout.height);
+    const OverlayCanvas canvas = MakeOverlayCanvas(layout);
+    const float w = canvas.width;
+    const float h = canvas.height;
     if (w <= 0.0f || h <= 0.0f) {
         return {};
     }
 
-    const float em = std::max(14.0f, std::round(h / 32.0f));
+    const float em = std::max(14.0f, std::round(canvas.ShortEdge() / 32.0f));
     const float scale = em / OverlayFont::kBakePixelHeight;
     const float margin = std::round(em * 0.6f);
     const float pad = std::round(em * 0.35f);
@@ -1704,7 +1757,7 @@ RendererVulkan::OverlayDraw RendererVulkan::PrepareShaderNotice(
 
     std::vector<float> verts;
     verts.reserve(256);
-    OverlayBuilder builder{verts, w, h};
+    OverlayBuilder builder{verts, canvas};
 
     const float text_w = OverlayBuilder::Measure(text, scale);
 
@@ -1742,13 +1795,14 @@ RendererVulkan::OverlayDraw RendererVulkan::PrepareToast(const Layout::Framebuff
         return {};
     }
 
-    const float w = static_cast<float>(layout.width);
-    const float h = static_cast<float>(layout.height);
+    const OverlayCanvas canvas = MakeOverlayCanvas(layout);
+    const float w = canvas.width;
+    const float h = canvas.height;
     if (w <= 0.0f || h <= 0.0f) {
         return {};
     }
 
-    const float em = std::max(16.0f, std::round(h / 28.0f));
+    const float em = std::max(16.0f, std::round(canvas.ShortEdge() / 28.0f));
     const float scale = em / OverlayFont::kBakePixelHeight;
     const float margin = std::round(em * 1.2f);
     const float pad = std::round(em * 0.45f);
@@ -1765,7 +1819,7 @@ RendererVulkan::OverlayDraw RendererVulkan::PrepareToast(const Layout::Framebuff
 
     std::vector<float> verts;
     verts.reserve(512);
-    OverlayBuilder builder{verts, w, h};
+    OverlayBuilder builder{verts, canvas};
 
     const float text_w = OverlayBuilder::Measure(text, scale);
 
@@ -1807,18 +1861,19 @@ RendererVulkan::OverlayDraw RendererVulkan::PrepareQuickMenu(
         return {};
     }
 
-    const float w = static_cast<float>(layout.width);
-    const float h = static_cast<float>(layout.height);
+    const OverlayCanvas canvas = MakeOverlayCanvas(layout);
+    const float w = canvas.width;
+    const float h = canvas.height;
     if (w <= 0.0f || h <= 0.0f) {
         return {};
     }
 
     std::vector<float> verts;
     verts.reserve(2048);
-    OverlayBuilder builder{verts, w, h};
+    OverlayBuilder builder{verts, canvas};
 
     // Font em size scaled to the output so the menu is a consistent size everywhere.
-    const float em = std::max(18.0f, std::round(h / 26.0f));
+    const float em = std::max(18.0f, std::round(canvas.ShortEdge() / 26.0f));
     const float title_em = std::round(em * 1.18f);
     const float scale = em / OverlayFont::kBakePixelHeight;
     const float title_scale = title_em / OverlayFont::kBakePixelHeight;

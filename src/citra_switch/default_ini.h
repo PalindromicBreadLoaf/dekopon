@@ -110,6 +110,10 @@ layout_cycle_mask =
 last_artic_base_addr =
 # Freeze the game while the quick menu is open (0, default).
 pause_in_quick_menu = false
+# Clockwise rotation of the launcher and the in-game overlay.
+menu_rotation = 0
+# Turn the d-pad with the menu, for holding the console the same way up as the UI (0, default).
+menu_rotate_input = false
 
 [Experimental]
 # Reduce the emulated CPU clock while movie playback is detected (0, default).

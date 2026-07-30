@@ -16,10 +16,20 @@ OverlayMenuState s_state;
 std::atomic<bool> s_visible{false};
 std::atomic<u32> s_pending_shader_compiles{0};
 
+std::atomic<u32> s_rotation{0};
+
 std::mutex s_toast_mutex;
 std::string s_toast;
 std::chrono::steady_clock::time_point s_toast_until;
 } // namespace
+
+void SetOverlayRotation(u32 degrees) {
+    s_rotation.store(degrees % 360 / 90 * 90, std::memory_order_release);
+}
+
+u32 GetOverlayRotation() {
+    return s_rotation.load(std::memory_order_acquire);
+}
 
 void SetOverlayMenuState(const OverlayMenuState& state) {
     {

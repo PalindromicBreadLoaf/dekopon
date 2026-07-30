@@ -20,6 +20,7 @@
 #include "citra_switch/overlay_menu.h"
 #include "core/hle/service/service.h"
 #include "core/system_titles.h"
+#include "video_core/overlay.h"
 
 namespace {
 
@@ -59,6 +60,8 @@ SwitchFrontend::SwitchPaths s_paths;
 std::string s_active_user_dir;
 std::string s_inserted_cartridge;
 std::string s_artic_base_address;
+int s_menu_rotation = 0;
+bool s_menu_input_rotated = false;
 
 // Every Settings::values entry config.ini round-trips, in file order. Reading and writing share
 // this list so the two cannot drift apart.
@@ -295,6 +298,11 @@ private:
         SwitchFrontend::SetPauseInQuickMenu(
             config->GetBoolean("Switch", "pause_in_quick_menu", false));
 
+        SwitchFrontend::SetMenuRotation(
+            static_cast<int>(config->GetInteger("Switch", "menu_rotation", 0)));
+        SwitchFrontend::SetMenuInputRotated(
+            config->GetBoolean("Switch", "menu_rotate_input", false));
+
         SwitchFrontend::SetMovieThrottleEnabled(
             config->GetBoolean("Experimental", "movie_cpu_throttle", false));
         SwitchFrontend::SetMovieThrottleClockPercentage(static_cast<std::int32_t>(
@@ -347,6 +355,9 @@ private:
         ss << "layout_cycle_mask = " << SwitchFrontend::GetLayoutCycleMask() << '\n';
         ss << "pause_in_quick_menu = "
            << (SwitchFrontend::IsPauseInQuickMenu() ? "true" : "false") << '\n';
+        ss << "menu_rotation = " << SwitchFrontend::GetMenuRotation() << '\n';
+        ss << "menu_rotate_input = " << (SwitchFrontend::IsMenuInputRotated() ? "true" : "false")
+           << '\n';
         ss << "launch_count = " << launch_count << "\n\n";
 
         ss << "[Experimental]\n";
@@ -450,6 +461,39 @@ void PrepareSystemFileSetup(SystemFileSetupMode mode) {
     Core::UninstallSystemFiles(mode == SystemFileSetupMode::Old3ds
                                    ? Core::SystemTitleSet::Old3ds
                                    : Core::SystemTitleSet::New3ds);
+}
+
+int GetMenuRotation() {
+    return s_menu_rotation;
+}
+
+void SetMenuRotation(int degrees) {
+    s_menu_rotation = std::clamp(degrees, 0, 359) / 90 * 90;
+    VideoCore::SetOverlayRotation(static_cast<u32>(s_menu_rotation));
+}
+
+bool IsMenuInputRotated() {
+    return s_menu_input_rotated;
+}
+
+void SetMenuInputRotated(bool enabled) {
+    s_menu_input_rotated = enabled;
+}
+
+MenuDirections RotateMenuDirections(MenuDirections pressed) {
+    if (!s_menu_input_rotated) {
+        return pressed;
+    }
+    switch (s_menu_rotation) {
+    case 90:
+        return {pressed.right, pressed.left, pressed.up, pressed.down};
+    case 180:
+        return {pressed.down, pressed.up, pressed.right, pressed.left};
+    case 270:
+        return {pressed.left, pressed.right, pressed.down, pressed.up};
+    default:
+        return pressed;
+    }
 }
 
 bool GetUseArticBaseController() {
