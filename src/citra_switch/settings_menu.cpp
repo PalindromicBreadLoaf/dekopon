@@ -171,6 +171,23 @@ SettingsRow StereoModeRow() {
     return Relayout(std::move(row));
 }
 
+// Config load zeroes the depth slider whenever stereo is off.
+SettingsRow StereoDepthRow() {
+    SettingsRow row = Number("Stereoscopic Depth", Settings::values.factor_3d, 0, 100, 5, "%");
+    const auto stereo_is_off = [] {
+        return Settings::values.render_3d.GetValue() == Settings::StereoRenderOption::Off;
+    };
+    row.value = [value = std::move(row.value), stereo_is_off] {
+        return stereo_is_off() ? std::string{"Needs 3D"} : value();
+    };
+    row.step = [step = std::move(row.step), stereo_is_off](int dir) {
+        if (!stereo_is_off()) {
+            step(dir);
+        }
+    };
+    return row;
+}
+
 SettingsRow DisableRightEyeRow() {
     auto& setting = Settings::values.disable_right_eye_render;
     const auto stereo_is_off = [] {
@@ -526,7 +543,7 @@ std::vector<SettingsRow> BuildSettingsPage(SettingsPage page) {
             Choice("Texture Filter", v.texture_filter, kTextureFilterNames),
             Choice("Anisotropic Filtering", v.anisotropic_filtering, kAnisotropyNames),
             StereoModeRow(),
-            Number("Stereoscopic Depth", v.factor_3d, 0, 100, 5, "%"),
+            StereoDepthRow(),
             Toggle("Swap Eyes", v.swap_eyes_3d),
             Relayout(Number("Labo VR Image Size", v.cardboard_screen_size, 30, 100, 5, "%")),
             Relayout(Number("Labo VR Horizontal Align", v.cardboard_x_shift, -100, 100, 5, "%")),
@@ -664,7 +681,7 @@ std::vector<SettingsRow> BuildQuickPage(QuickPage page) {
     case QuickPage::Stereo:
         return {
             StereoModeRow(),
-            Number("Stereoscopic Depth", v.factor_3d, 0, 100, 5, "%"),
+            StereoDepthRow(),
             Toggle("Swap Eyes", v.swap_eyes_3d),
             Relayout(Number("Labo VR Image Size", v.cardboard_screen_size, 30, 100, 5, "%")),
             Relayout(Number("Labo VR Horizontal Align", v.cardboard_x_shift, -100, 100, 5, "%")),

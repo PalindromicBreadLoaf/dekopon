@@ -2,6 +2,7 @@
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
 
+#include <atomic>
 #include <chrono>
 #include <boost/algorithm/string/replace.hpp>
 #include <boost/regex.hpp>
@@ -183,7 +184,12 @@ public:
                 // Don't close the file so we can print a stacktrace if necessary
                 enabled = false;
             }
-            file->Flush();
+            // Flush occasionally rather than immediately on error.
+            const auto now = std::chrono::steady_clock::now();
+            if (write_limit_exceeded || now - last_flush >= MIN_FLUSH_INTERVAL) {
+                last_flush = now;
+                file->Flush();
+            }
         }
     }
 
@@ -202,9 +208,12 @@ public:
     }
 
 private:
+    static constexpr auto MIN_FLUSH_INTERVAL = std::chrono::milliseconds{250};
+
     std::unique_ptr<FileUtil::IOFile> file;
     bool enabled = true;
     std::size_t bytes_written = 0;
+    std::chrono::steady_clock::time_point last_flush{};
 };
 
 /**
@@ -354,8 +363,9 @@ public:
                 backend.Write(new_entry);
                 backend.Flush();
             });
-        } else {
-            message_queue.EmplaceWait(new_entry);
+        } else if (!message_queue.TryEmplace(std::move(new_entry))) {
+            // Waiting for room makes the emulator wait constantly on logging.
+            dropped_entries.fetch_add(1, std::memory_order_relaxed);
         }
     }
 
@@ -460,6 +470,7 @@ private:
                 // (for example, when the stop token is signaled).
                 if (entry.filename != nullptr) {
                     write_logs();
+                    ReportDroppedEntries();
                 }
             }
             // Drain the logging queue. Only writes out up to MAX_LOGS_TO_WRITE to prevent a
@@ -469,6 +480,19 @@ private:
                 write_logs();
             }
         });
+    }
+
+    // Runs on the backend thread only, once the queue it drains has room again.
+    void ReportDroppedEntries() {
+        const u64 dropped = dropped_entries.exchange(0, std::memory_order_relaxed);
+        if (dropped == 0) {
+            return;
+        }
+        const auto entry =
+            CreateEntry(Class::Log, Level::Warning, "backend.cpp", 0, "ReportDroppedEntries",
+                        fmt::format("Dropped {} log entries, the log could not keep up", dropped),
+                        time_origin);
+        ForEachBackend([&entry](Backend& backend) { backend.Write(entry); });
     }
 
     void StopBackendThread() {
@@ -545,6 +569,7 @@ private:
 #endif
 
     MPSCQueue<Entry> message_queue{};
+    std::atomic<u64> dropped_entries{};
     std::chrono::steady_clock::time_point time_origin{std::chrono::steady_clock::now()};
     std::jthread backend_thread;
 

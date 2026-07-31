@@ -3,8 +3,12 @@
 // Refer to the license.txt file included.
 
 #include <array>
+#include <chrono>
 #include <csignal>
 #include <cstring>
+#include <mutex>
+#include <optional>
+#include <utility>
 #include <boost/serialization/array.hpp>
 #include <boost/serialization/binary_object.hpp>
 #include "audio_core/dsp_interface.h"
@@ -108,6 +112,36 @@ struct HostBacking {
     }
 };
 
+// A guest that dereferences a wild pointer faults for as long as it keeps walking.
+// Stop it from doing that to prevent freezing in the emulator.
+class LogThrottle {
+public:
+    // A value means log, and is the number of occurrences suppressed since the last one logged.
+    std::optional<u64> Acquire() {
+        const auto now = std::chrono::steady_clock::now();
+        std::scoped_lock lock{mutex};
+        if (now - window_start >= WINDOW) {
+            window_start = now;
+            logged_in_window = 1;
+        } else if (logged_in_window < BURST) {
+            ++logged_in_window;
+        } else {
+            ++suppressed;
+            return std::nullopt;
+        }
+        return std::exchange(suppressed, 0);
+    }
+
+private:
+    static constexpr auto WINDOW = std::chrono::seconds{1};
+    static constexpr u32 BURST = 8;
+
+    std::mutex mutex;
+    std::chrono::steady_clock::time_point window_start{};
+    u32 logged_in_window = 0;
+    u64 suppressed = 0;
+};
+
 }  // namespace
 
 void PageTable::Clear() {
@@ -184,6 +218,8 @@ public:
 
     PAddr plugin_fb_address{};
 
+    LogThrottle unmapped_log_throttle;
+
 #ifdef __SWITCH__
     // Guest fastmem arena (Switch only). One 4 GiB host reservation whose pages mirror the guest
     // virtual layout of the arena-backed page table.
@@ -200,6 +236,7 @@ public:
     // The kernel needs the exact (dest, source) pair to unmap, and reconciliation needs the previous source,
     // so it is tracked explicitly rather than recomputed.
     std::vector<u8*> arena_shadow;
+    LogThrottle arena_log_throttle;
 
     std::uintptr_t ArenaVA(u32 page) const {
         return reinterpret_cast<std::uintptr_t>(arena_base) +
@@ -248,10 +285,19 @@ public:
                 }
                 ++k;
             }
-            Core::Horizon::Arena::UnmapAlias(ArenaVA(p), reinterpret_cast<std::uintptr_t>(cur),
-                                             static_cast<std::size_t>(k - p) * CITRA_PAGE_SIZE);
-            for (u32 j = p; j < k; ++j) {
-                arena_shadow[j] = nullptr;
+            if (Core::Horizon::Arena::UnmapAlias(ArenaVA(p),
+                                                 reinterpret_cast<std::uintptr_t>(cur),
+                                                 static_cast<std::size_t>(k - p) *
+                                                     CITRA_PAGE_SIZE)) {
+                for (u32 j = p; j < k; ++j) {
+                    arena_shadow[j] = nullptr;
+                }
+            } else if (const auto suppressed = arena_log_throttle.Acquire()) {
+                // Forgetting an alias the kernel still holds would leave the guest reading the old
+                // page through the arena while its page table points somewhere else.
+                LOG_ERROR(HW_Memory,
+                          "Could not unmap arena alias for guest page 0x{:08X} (+{} suppressed)",
+                          p * CITRA_PAGE_SIZE, *suppressed);
             }
             p = k;
         }
@@ -277,6 +323,10 @@ public:
                 for (u32 j = p; j < k; ++j) {
                     arena_shadow[j] = des + static_cast<std::uint64_t>(j - p) * CITRA_PAGE_SIZE;
                 }
+            } else if (const auto suppressed = arena_log_throttle.Acquire()) {
+                LOG_ERROR(HW_Memory,
+                          "Could not map arena alias for guest page 0x{:08X} (+{} suppressed)",
+                          p * CITRA_PAGE_SIZE, *suppressed);
             }
             p = k;
         }
@@ -862,6 +912,18 @@ void MemorySystem::UnregisterPageTable(std::shared_ptr<PageTable> page_table) {
 
 template <typename T>
 void MemorySystem::UnmappedAccess(const VAddr vaddr, const T value, bool read) {
+    const bool breaking = Settings::values.break_on_unmapped_memory_access.GetValue();
+    bool debugging = breaking;
+#ifdef ENABLE_GDBSTUB
+    debugging = debugging || GDBStub::IsConnected();
+#endif
+    // Every access has to reach the break paths below, but only a bounded number may be logged.
+    const auto suppressed =
+        debugging ? std::optional<u64>{0} : impl->unmapped_log_throttle.Acquire();
+    if (!suppressed) {
+        return;
+    }
+
     const std::string mode = (read ? "Read" : "Write");
     const std::string value_str = read ? std::string("") : fmt::format(" 0x{:08X}", value);
     const std::string message = fmt::format("unmapped {}{}{} @ 0x{:08X} at PC 0x{:08X}", mode,
@@ -871,12 +933,16 @@ void MemorySystem::UnmappedAccess(const VAddr vaddr, const T value, bool read) {
         GDBStub::Break(SIGSEGV);
     } else
 #endif
-        if (Settings::values.break_on_unmapped_memory_access) {
+        if (breaking) {
         impl->system.SetStatus(Core::System::ResultStatus::ErrorMemoryExceptionRaised,
                                message.c_str());
     }
 
-    LOG_ERROR(HW_Memory, "{}", message);
+    if (*suppressed != 0) {
+        LOG_ERROR(HW_Memory, "{} (+{} suppressed)", message, *suppressed);
+    } else {
+        LOG_ERROR(HW_Memory, "{}", message);
+    }
 }
 
 template <typename T>

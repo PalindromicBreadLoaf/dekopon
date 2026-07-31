@@ -245,7 +245,9 @@ private:
         if constexpr (std::is_integral_v<Type> && !std::is_same_v<Type, bool>) {
             if (group == "Renderer" &&
                 setting.GetLabel() == Settings::values.factor_3d.GetLabel()) {
-                default_value = static_cast<Type>(60);
+                if (Settings::values.render_3d.GetValue() != Settings::StereoRenderOption::Off) {
+                    default_value = static_cast<Type>(60);
+                }
             } else if (group == "Layout" &&
                        setting.GetLabel() == Settings::values.cardboard_x_shift.GetLabel()) {
                 default_value = static_cast<Type>(35);
@@ -271,6 +273,10 @@ private:
     void ReadValues() {
         VisitPersistedSettings(
             [this](const char* group, auto& setting) { ReadSetting(group, setting); });
+
+        if (Settings::values.render_3d.GetValue() == Settings::StereoRenderOption::Off) {
+            Settings::values.factor_3d = 0;
+        }
 
         // New 3DS mode doubles the emulated core count and the JIT code caches that go with it.
         // This is just a performance loss if the game doesn't use these cores.
