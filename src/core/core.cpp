@@ -510,6 +510,36 @@ void System::PrepareReschedule() {
     reschedule_pending = true;
 }
 
+void System::FlushDeferredCacheInvalidations() {
+    if (deferred_invalidations.empty()) {
+        return;
+    }
+
+    std::sort(deferred_invalidations.begin(), deferred_invalidations.end());
+
+    // Relocations land a word at a time within a handful of segments, so merging across small gaps
+    // collapses tens of thousands of ranges into a few.
+    constexpr u32 MERGE_SLACK = 4096;
+    auto range = deferred_invalidations.front();
+    const auto invalidate = [this](std::pair<u32, u32> r) {
+        for (const auto& cpu : cpu_cores) {
+            cpu->InvalidateCacheRange(r.first, r.second - r.first);
+        }
+    };
+
+    for (const auto& next : deferred_invalidations) {
+        if (next.first > range.second + MERGE_SLACK) {
+            invalidate(range);
+            range = next;
+            continue;
+        }
+        range.second = std::max(range.second, next.second);
+    }
+    invalidate(range);
+
+    deferred_invalidations.clear();
+}
+
 PerfStats::Results System::GetAndResetPerfStats() {
     return (perf_stats && timing) ? perf_stats->GetAndResetStats(timing->GetGlobalTimeUs())
                                   : PerfStats::Results{};

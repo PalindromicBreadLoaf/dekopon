@@ -224,10 +224,38 @@ public:
     }
 
     void InvalidateCacheRange(u32 start_address, std::size_t length) {
+        if (defer_cache_invalidation != 0) [[unlikely]] {
+            deferred_invalidations.emplace_back(start_address,
+                                                start_address + static_cast<u32>(length));
+            return;
+        }
         for (const auto& cpu : cpu_cores) {
             cpu->InvalidateCacheRange(start_address, length);
         }
     }
+
+    /**
+     * Batches every InvalidateCacheRange issued while alive into a merged set, flushed on
+     * destruction.
+     */
+    class ScopedDeferredCacheInvalidation {
+    public:
+        explicit ScopedDeferredCacheInvalidation(System& system_) : system{system_} {
+            system.defer_cache_invalidation++;
+        }
+
+        ~ScopedDeferredCacheInvalidation() {
+            if (--system.defer_cache_invalidation == 0) {
+                system.FlushDeferredCacheInvalidations();
+            }
+        }
+
+        ScopedDeferredCacheInvalidation(const ScopedDeferredCacheInvalidation&) = delete;
+        ScopedDeferredCacheInvalidation& operator=(const ScopedDeferredCacheInvalidation&) = delete;
+
+    private:
+        System& system;
+    };
 
     /**
      * Gets a reference to the emulated DSP.
@@ -498,6 +526,12 @@ private:
 
     /// Path for current inserted cartridge
     std::string inserted_cartridge;
+
+    /// Merges the ranges collected under ScopedDeferredCacheInvalidation and invalidates them.
+    void FlushDeferredCacheInvalidations();
+
+    std::vector<std::pair<u32, u32>> deferred_invalidations;
+    u32 defer_cache_invalidation = 0;
 
     /// ARM11 CPU core
     std::vector<std::shared_ptr<ARM_Interface>> cpu_cores;
