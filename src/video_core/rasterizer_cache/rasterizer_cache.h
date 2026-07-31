@@ -1026,7 +1026,8 @@ void RasterizerCache<T>::ValidateSurface(SurfaceId surface_id, PAddr addr, u32 s
         }
 
         FlushRegion(params.addr, params.size);
-        if (!use_custom_textures || !UploadCustomSurface(surface_id, interval)) {
+        const bool try_custom = use_custom_textures && custom_tex_manager.HasMaterials();
+        if (!try_custom || !UploadCustomSurface(surface_id, interval)) {
             UploadSurface(surface, interval);
         }
         notify_validated(params.GetInterval());

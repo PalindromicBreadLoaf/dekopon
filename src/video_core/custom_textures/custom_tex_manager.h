@@ -81,6 +81,11 @@ public:
         return use_new_hash;
     }
 
+    /// True once a pack with at least one usable texture has been found for this title.
+    bool HasMaterials() const noexcept {
+        return has_materials;
+    }
+
 private:
     /// Parses the custom texture filename (hash, material type, etc).
     bool ParseFilename(const FileUtil::FSTEntry& file, CustomTexture* texture);
@@ -106,6 +111,7 @@ private:
     u64 max_custom_tex_mem{0};
     u64 title_id{};
     bool textures_loaded{false};
+    bool has_materials{false};
     bool async_custom_loading{true};
     bool skip_mipmap{false};
     bool flip_png_files{true};
