@@ -78,8 +78,22 @@ std::string GetDefaultRomsDir(const std::string& user_dir);
 // Serialises the current Settings::values back to config.ini.
 void SaveConfig();
 
-// Puts everything the Settings tab covers back to defaults.
-void ResetSettings();
+// The bundles the reset row can put the settings into.
+enum class SettingsPreset {
+    Default,
+    Performance,
+    UltraPerformance,
+};
+
+constexpr int NumSettingsPresets = 3;
+
+const char* SettingsPresetName(SettingsPreset preset);
+
+// One-line description shown under the preset's name in the picker.
+const char* SettingsPresetSummary(SettingsPreset preset);
+
+// Puts everything the Settings tab covers back to defaults, then applies `preset` on top.
+void ResetSettings(SettingsPreset preset);
 
 // Flushes and stops the logger.
 void Shutdown();

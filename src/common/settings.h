@@ -504,7 +504,7 @@ struct Values {
     Setting<bool> use_cpu_jit{true, Keys::use_cpu_jit};
     // Alias guest RAM into a 4 GiB host arena so the JIT reaches it without a page
     // table walk. Ignored where no fastmem arena is available.
-    Setting<bool> fastmem{true, Keys::fastmem};
+    Setting<bool> fastmem{false, Keys::fastmem};
     SwitchableSetting<s32, true> cpu_clock_percentage{100, 5, 400, Keys::cpu_clock_percentage};
     SwitchableSetting<bool> is_new_3ds{true, Keys::is_new_3ds};
     SwitchableSetting<bool> lle_applets{true, Keys::lle_applets};

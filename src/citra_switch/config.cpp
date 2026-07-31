@@ -410,6 +410,32 @@ private:
 // Kept alive past Bootstrap() so the menu can re-save settings while preserving launch_count.
 std::unique_ptr<Config> s_config;
 
+// Layered on top of a defaults reset, so each preset only lists what it changes.
+void ApplyPreset(SwitchFrontend::SettingsPreset preset) {
+    using SwitchFrontend::SettingsPreset;
+    auto& v = Settings::values;
+
+    // The arena stays off by default while it is being investigated.
+    v.fastmem = preset != SettingsPreset::Default;
+    if (preset == SettingsPreset::Default) {
+        return;
+    }
+
+    v.async_gpu_emulation = true;
+    v.async_shader_compilation = true;
+    v.shaders_accurate_mul = false;
+    v.disable_right_eye_render = true;
+    SwitchFrontend::SetMovieThrottleEnabled(true);
+    if (preset == SettingsPreset::Performance) {
+        return;
+    }
+
+    v.anisotropic_filtering = Settings::AnisotropicFiltering::Off;
+    v.skip_slow_draw = true;
+    v.skip_texture_copy = true;
+    v.skip_cpu_write = true;
+}
+
 } // namespace
 
 namespace SwitchFrontend {
@@ -548,11 +574,34 @@ void SaveConfig() {
     }
 }
 
-void ResetSettings() {
+const char* SettingsPresetName(SettingsPreset preset) {
+    switch (preset) {
+    case SettingsPreset::Performance:
+        return "Performance";
+    case SettingsPreset::UltraPerformance:
+        return "Ultra Performance";
+    default:
+        return "Default";
+    }
+}
+
+const char* SettingsPresetSummary(SettingsPreset preset) {
+    switch (preset) {
+    case SettingsPreset::Performance:
+        return "Faster, at the cost of accuracy. Some games may glitch, but overall what should be used.";
+    case SettingsPreset::UltraPerformance:
+        return "Fastest by breaking things. Expect breakage.";
+    default:
+        return "Default stettins that are shipped with every build.";
+    }
+}
+
+void ResetSettings(SettingsPreset preset) {
     if (!s_config) {
         return;
     }
     s_config->ResetToDefaults();
+    ApplyPreset(preset);
 
     Common::Log::Filter log_filter;
     log_filter.ParseFilterString(Settings::values.log_filter.GetValue());
@@ -560,7 +609,7 @@ void ResetSettings() {
 
     RequestLayoutUpdate();
     s_config->Save();
-    LOG_INFO(Config, "Settings reset to defaults");
+    LOG_INFO(Config, "Settings reset to the {} preset", SettingsPresetName(preset));
 }
 
 void Shutdown() {

@@ -506,7 +506,7 @@ std::vector<SettingsRow> BuildSettingsPage(SettingsPage page) {
             Toggle("Shader Compile Notice", v.show_shader_compile_notice),
             PauseInQuickMenuRow(),
             {"Reset All Settings",
-             [] { return std::string{"Defaults"}; },
+             [] { return std::string{"Choose"}; },
              {},
              SettingsModal::ResetDefaults},
         };

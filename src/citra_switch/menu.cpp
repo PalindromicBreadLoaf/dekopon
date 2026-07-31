@@ -1025,6 +1025,8 @@ public:
                 PumpInstall();
             } else if (confirm) {
                 HandleConfirm(down);
+            } else if (preset_picker_open) {
+                HandlePresetPicker(down, nav);
             } else if (layout_picker_open) {
                 HandleLayoutPicker(down, nav);
             } else if (remap_open) {
@@ -1055,7 +1057,7 @@ public:
             }
 
             if (!install_active && !details_open && !layout_picker_open && !remap_open &&
-                !confirm) {
+                !preset_picker_open && !confirm) {
                 HandleTouch();
             }
             if (pending_launch) {
@@ -1125,6 +1127,10 @@ private:
     // R3 screen-layout picker.
     bool layout_picker_open = false;
     int layout_picker_sel = 0;
+
+    // Preset picker the reset row opens.
+    bool preset_picker_open = false;
+    int preset_sel = 0;
 
     // Controller remapping page.
     bool remap_open = false;
@@ -1482,7 +1488,7 @@ private:
             settings_dirty = true;
             break;
         case SettingsModal::ResetDefaults:
-            OpenResetConfirm();
+            OpenPresetPicker();
             break;
         case SettingsModal::ClearShaderCache:
             OpenShaderCacheConfirm();
@@ -1559,18 +1565,44 @@ private:
         }
     }
 
-    void OpenResetConfirm() {
+    void OpenPresetPicker() {
+        preset_sel = 0;
+        preset_picker_open = true;
+    }
+
+    void HandlePresetPicker(u64 down, u32 nav) {
+        if (nav & DirUp) {
+            preset_sel = (preset_sel - 1 + NumSettingsPresets) % NumSettingsPresets;
+        }
+        if (nav & DirDown) {
+            preset_sel = (preset_sel + 1) % NumSettingsPresets;
+        }
+        if (down & HidNpadButton_A) {
+            OpenResetConfirm(static_cast<SettingsPreset>(preset_sel));
+        }
+        if (down & HidNpadButton_B) {
+            preset_picker_open = false;
+        }
+    }
+
+    void OpenResetConfirm(SettingsPreset preset) {
+        const std::string name = SettingsPresetName(preset);
+        const bool risky = preset != SettingsPreset::Default;
         confirm = ConfirmPrompt{
-            "Reset all settings?",
-            {"All settings will be set to their default for this version,",
-             "with controller mappings included."},
-            "Your folders, titles, and saves are untouched.",
+            "Reset to " + name + " settings?",
+            risky ? std::vector<std::string>{"Every setting is reset, then the " + name,
+                                             "selected preset is applied. Mappings are reset too."}
+                  : std::vector<std::string>{"Every setting returns to its default for this",
+                                             "version, with controller mappings included."},
+            risky ? "This preset can break some games."
+                  : "Your folders, titles, and saves are untouched.",
             "Reset",
-            [this] {
-                ResetSettings();
-                // ResetSettings() has already written the defaults out.
+            [this, preset] {
+                ResetSettings(preset);
+                // ResetSettings() has already written the new values out.
                 settings_dirty = false;
-                ShowNotice("Settings reset to defaults", false);
+                preset_picker_open = false;
+                ShowNotice("Settings reset to " + std::string{SettingsPresetName(preset)}, false);
             }};
     }
 
@@ -2236,6 +2268,9 @@ private:
         if (layout_picker_open) {
             DrawLayoutPicker(c);
         }
+        if (preset_picker_open) {
+            DrawPresetPicker(c);
+        }
         if (remap_open) {
             DrawRemapPage(c);
         }
@@ -2576,6 +2611,43 @@ private:
         int hx = x + 24;
         const int hy = y + hint_y;
         hx += DrawHint(c, hx, hy, "A", confirm->accept) + 22;
+        DrawHint(c, hx, hy, "B", "Cancel");
+    }
+
+    // A centred modal to choose which bundle of settings the reset row applies.
+    void DrawPresetPicker(Canvas& c) {
+        const int w = std::min(620, g_screen_w - 48);
+        constexpr int row_h = 58;
+        constexpr int top_pad = 78;    // Room for the title and subtitle.
+        constexpr int bottom_pad = 82; // Room for the disclaimer and the button hints.
+        const int h = top_pad + NumSettingsPresets * row_h + bottom_pad;
+        const int x = (g_screen_w - w) / 2;
+        const int y = (g_screen_h - h) / 2;
+        c.FillRect(0, 0, g_screen_w, g_screen_h, MakeColor(0x10, 0x11, 0x13, 0xC0));
+        c.RoundBorder(x, y, w, h, 14, 2, kColBadge, kColSurface);
+
+        g_font.Draw(c, x + 24, y + 40, "Reset All Settings", 24, kColText);
+        g_font.Draw(c, x + 24, y + 64, "Choose the settings to reset to", 16, kColTextDim);
+
+        for (int i = 0; i < NumSettingsPresets; ++i) {
+            const int ry = y + top_pad + i * row_h;
+            const int rx = x + 16;
+            const int rw = w - 32;
+            if (i == preset_sel) {
+                c.FillRoundRect(rx, ry, rw, row_h - 4, 8, kColSurfaceHi);
+                c.FillRoundRect(rx, ry + 8, 4, row_h - 20, 2, kColAccent);
+            }
+            const auto preset = static_cast<SettingsPreset>(i);
+            g_font.Draw(c, rx + 20, ry + 24, SettingsPresetName(preset), 20, kColText);
+            g_font.Draw(c, rx + 20, ry + 46, SettingsPresetSummary(preset), 16, kColTextDim);
+        }
+
+        g_font.Draw(c, x + 24, y + h - 62,
+                    "Performance and Ultra Performance can break some games.", 16, kColAccent);
+
+        int hx = x + 24;
+        const int hy = y + h - 38;
+        hx += DrawHint(c, hx, hy, "A", "Choose") + 22;
         DrawHint(c, hx, hy, "B", "Cancel");
     }
 
