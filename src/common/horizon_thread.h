@@ -9,6 +9,10 @@
 
 namespace Common::Horizon {
 
+inline constexpr std::uint32_t CoreFrontend = 0; // Main thread, GPU support, shader compilation.
+inline constexpr std::uint32_t CoreAudio = 1;    // Audio output.
+inline constexpr std::uint32_t CoreEmu = 2;      // Emulation thread.
+
 // Pins the calling thread to `core_id`.
 bool PinCurrentThread(std::uint32_t core_id);
 
@@ -27,9 +31,8 @@ bool PinCurrentThreadAffinity(std::int32_t preferred_core, std::uint64_t affinit
 // heavy thread takes the otherwise idle main thread.
 bool PinAsyncGpuThread();
 
-// Pins a Vulkan support thread (submit worker, present, fence waiter, shader compiler). These are
-// mostly blocked, so they double up with audio rather than with whichever thread is doing GPU work.
-bool PinGraphicsSupportThread(bool async_gpu_enabled);
+// Pins a Vulkan support thread.
+bool PinGraphicsSupportThread();
 
 // Returns the core the calling thread is pinned to, or -1 when it is not pinned.
 std::int32_t GetCurrentThreadCore();

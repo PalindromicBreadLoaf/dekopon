@@ -320,7 +320,7 @@ void PresentWindow::WaitPresent() {
 void PresentWindow::PresentThread(std::stop_token token) {
     Common::SetCurrentThreadName("VulkanPresent");
     // See VulkanWorker: park presentation alongside submission.
-    Common::Horizon::PinGraphicsSupportThread(Settings::values.async_gpu_emulation.GetValue());
+    Common::Horizon::PinGraphicsSupportThread();
     while (!token.stop_requested()) {
         std::unique_lock lock{queue_mutex};
 

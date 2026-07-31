@@ -241,7 +241,7 @@ std::string ResolveRomPath(const std::string& rom_arg) {
 }
 
 void EmuThread(std::string path) {
-    if (!Common::Horizon::PinCurrentThread(2)) {
+    if (!Common::Horizon::PinCurrentThread(Common::Horizon::CoreEmu)) {
         LOG_WARNING(Frontend, "Failed to pin emulation thread to core 2");
     }
 

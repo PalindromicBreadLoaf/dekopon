@@ -250,7 +250,7 @@ int main(int argc, char* argv[]) {
     if (!have_romfs) {
         std::printf("Warning: romfsInit() failed.\n");
     }
-    if (!Common::Horizon::PinCurrentThread(0)) {
+    if (!Common::Horizon::PinCurrentThread(Common::Horizon::CoreFrontend)) {
         std::printf("Warning: failed to pin frontend thread to core 0.\n");
     }
 

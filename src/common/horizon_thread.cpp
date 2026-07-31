@@ -66,14 +66,11 @@ bool PinCurrentThreadAffinity(std::int32_t preferred_core, std::uint64_t affinit
 }
 
 bool PinAsyncGpuThread() {
-    return PinCurrentThreadPreferred({0, 3});
+    return PinCurrentThread(CoreFrontend);
 }
 
-bool PinGraphicsSupportThread(bool async_gpu_enabled) {
-    if (async_gpu_enabled) {
-        return PinCurrentThreadPreferred({3, 1, 0});
-    }
-    return PinCurrentThreadPreferred({3, 0});
+bool PinGraphicsSupportThread() {
+    return PinCurrentThread(CoreFrontend);
 }
 
 std::int32_t GetCurrentThreadCore() {
@@ -111,7 +108,7 @@ bool PinAsyncGpuThread() {
     return false;
 }
 
-bool PinGraphicsSupportThread(bool) {
+bool PinGraphicsSupportThread() {
     return false;
 }
 
