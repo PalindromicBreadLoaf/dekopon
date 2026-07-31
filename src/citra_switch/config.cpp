@@ -588,7 +588,7 @@ const char* SettingsPresetName(SettingsPreset preset) {
 const char* SettingsPresetSummary(SettingsPreset preset) {
     switch (preset) {
     case SettingsPreset::Performance:
-        return "Faster, at the cost of accuracy. Some games may glitch, but overall what should be used.";
+        return "Faster, at the cost of accuracy. Recommend unless things break.";
     case SettingsPreset::UltraPerformance:
         return "Fastest by breaking things. Expect breakage.";
     default:
