@@ -59,7 +59,8 @@ std::optional<u32> ShaderSetup::WriteUniformFloatReg(ShaderRegs& config, u32 val
 
     const auto uniform = uniform_queue.Get(is_float32);
     if (uniform_setup.index >= uniforms.f.size()) {
-        LOG_ERROR(HW_GPU, "Invalid float uniform index {}", uniform_setup.index.Value());
+        // Guest-controlled and reached several times per frame by some titles.
+        LOG_DEBUG(HW_GPU, "Invalid float uniform index {}", uniform_setup.index.Value());
         return std::nullopt;
     }
 
@@ -90,7 +91,7 @@ std::optional<ShaderSetup::UniformWriteRange> ShaderSetup::WriteUniformFloatRegR
 
         const auto uniform = uniform_queue.Get(is_float32);
         if (uniform_setup.index >= uniforms.f.size()) [[unlikely]] {
-            LOG_ERROR(HW_GPU, "Invalid float uniform index {}", uniform_setup.index.Value());
+            LOG_DEBUG(HW_GPU, "Invalid float uniform index {}", uniform_setup.index.Value());
             break;
         }
 
