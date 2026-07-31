@@ -14,6 +14,7 @@
 #include "citra_switch/menu_data.h"
 #include "common/file_derived.h"
 #include "common/file_util.h"
+#include "common/logging/log.h"
 #include "common/string_util.h"
 #include "common/zstd_compression.h"
 #include "core/file_sys/cia_container.h"
@@ -35,6 +36,26 @@ constexpr std::uint64_t kTidHighDlc = 0x0004008C00000000ULL;
 
 // Don't scan updates/dlcs into the library window.
 constexpr std::array<std::uint64_t, 2> kLibraryTidHighs{kTidHighApplication, kTidHighDemo};
+
+// The per-backend cache subdirectories of the shader directory.
+constexpr std::array<const char*, 2> kShaderCacheDirs{"vulkan", "opengl"};
+
+std::string ShaderCacheDir(const char* backend) {
+    return FileUtil::GetUserPath(FileUtil::UserPath::ShaderDir) + backend;
+}
+
+std::uint64_t DirectorySize(const std::string& directory) {
+    FileUtil::FSTEntry root;
+    FileUtil::ScanDirectoryTree(directory, root, 8);
+    std::vector<FileUtil::FSTEntry> files;
+    FileUtil::GetAllFilesFromNestedEntries(root, files);
+
+    std::uint64_t total = 0;
+    for (const FileUtil::FSTEntry& file : files) {
+        total += file.size;
+    }
+    return total;
+}
 
 // Decode game icons
 std::uint32_t Rgb565ToRgba8888(std::uint16_t c) {
@@ -300,6 +321,43 @@ const char* TitleKindName(TitleKind kind) {
 std::string FormatTitleVersion(std::uint16_t version) {
     return fmt::format("v{}.{}.{} ({})", (version >> 10) & 0x3F, (version >> 4) & 0x3F,
                        version & 0xF, version);
+}
+
+std::string FormatSize(std::uint64_t bytes) {
+    constexpr std::array<const char*, 4> units{"B", "KB", "MB", "GB"};
+    double value = static_cast<double>(bytes);
+    std::size_t unit = 0;
+    while (value >= 1024.0 && unit + 1 < units.size()) {
+        value /= 1024.0;
+        ++unit;
+    }
+    return unit == 0 ? fmt::format("{:.0f} {}", value, units[unit])
+                     : fmt::format("{:.1f} {}", value, units[unit]);
+}
+
+std::uint64_t GetShaderCacheSize() {
+    std::uint64_t total = 0;
+    for (const char* backend : kShaderCacheDirs) {
+        total += DirectorySize(ShaderCacheDir(backend));
+    }
+    return total;
+}
+
+std::uint64_t ClearShaderCache() {
+    std::uint64_t freed = 0;
+    for (const char* backend : kShaderCacheDirs) {
+        const std::string dir = ShaderCacheDir(backend);
+        if (!FileUtil::IsDirectory(dir)) {
+            continue;
+        }
+        const std::uint64_t size = DirectorySize(dir);
+        if (FileUtil::DeleteDirRecursively(dir)) {
+            freed += size;
+        } else {
+            LOG_ERROR(Frontend, "Failed to delete shader cache directory {}", dir);
+        }
+    }
+    return freed;
 }
 
 TitleDetails GetTitleDetails(const GameEntry& entry) {

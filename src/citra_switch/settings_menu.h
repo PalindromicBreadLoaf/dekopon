@@ -34,6 +34,7 @@ enum class SettingsModal {
     ControllerMap,
     LogFilter,
     ResetDefaults,
+    ClearShaderCache,
 };
 
 struct SettingsRow {

@@ -12,6 +12,7 @@
 #include "audio_core/dsp_interface.h"
 #include "citra_switch/config.h"
 #include "citra_switch/input.h"
+#include "citra_switch/menu_data.h"
 #include "citra_switch/overlay_menu.h"
 #include "citra_switch/settings_menu.h"
 #include "common/logging/backend.h"
@@ -442,6 +443,13 @@ SettingsRow OverlayOpacityRow() {
             [](int dir) { StepOverlayScreenOpacity(dir); }};
 }
 
+// Show size only when the page was built
+SettingsRow ClearShaderCacheRow() {
+    const std::uint64_t bytes = GetShaderCacheSize();
+    return {"Clear Shader Cache", [bytes] { return FormatSize(bytes); }, {},
+            SettingsModal::ClearShaderCache};
+}
+
 // "N of M" summary of how many layouts R3 is set to cycle through.
 SettingsRow LayoutCycleRow() {
     return {"R3 Screen Layouts",
@@ -524,6 +532,7 @@ std::vector<SettingsRow> BuildSettingsPage(SettingsPage page) {
             Toggle("Shader JIT", v.use_shader_jit),
             Toggle("Async Shader Compilation", v.async_shader_compilation),
             Toggle("Disk Shader Cache", v.use_disk_shader_cache),
+            ClearShaderCacheRow(),
             Toggle("Async GPU (restart)", v.async_gpu_emulation),
             Toggle("Strict GPU Sync", v.strict_gpu_sync),
             Toggle("Async Presentation", v.async_presentation),

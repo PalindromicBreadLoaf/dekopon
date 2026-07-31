@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -893,19 +894,6 @@ bool IsValidArticAddress(const std::string& address) {
     return value > 0 && value <= 0xFFFF;
 }
 
-std::string FormatSize(u64 bytes) {
-    constexpr std::array<const char*, 4> units{"B", "KB", "MB", "GB"};
-    double value = static_cast<double>(bytes);
-    std::size_t unit = 0;
-    while (value >= 1024.0 && unit + 1 < units.size()) {
-        value /= 1024.0;
-        ++unit;
-    }
-    char buf[32];
-    std::snprintf(buf, sizeof(buf), unit == 0 ? "%.0f %s" : "%.1f %s", value, units[unit]);
-    return buf;
-}
-
 std::string FormatTitleId(u64 program_id) {
     char buf[24];
     std::snprintf(buf, sizeof(buf), "%016llX", static_cast<unsigned long long>(program_id));
@@ -1035,8 +1023,8 @@ public:
             bool done = false;
             if (install_active) {
                 PumpInstall();
-            } else if (reset_confirm_open) {
-                HandleResetConfirm(down);
+            } else if (confirm) {
+                HandleConfirm(down);
             } else if (layout_picker_open) {
                 HandleLayoutPicker(down, nav);
             } else if (remap_open) {
@@ -1067,7 +1055,7 @@ public:
             }
 
             if (!install_active && !details_open && !layout_picker_open && !remap_open &&
-                !reset_confirm_open) {
+                !confirm) {
                 HandleTouch();
             }
             if (pending_launch) {
@@ -1143,8 +1131,15 @@ private:
     int remap_sel = 0;
     int remap_scroll = 0;
 
-    // Confirmation for the reset-to-defaults row.
-    bool reset_confirm_open = false;
+    // Confirmation for the settings rows that destroy something.
+    struct ConfirmPrompt {
+        std::string title;
+        std::vector<std::string> lines;
+        std::string note;
+        const char* accept;
+        std::function<void()> on_accept;
+    };
+    std::optional<ConfirmPrompt> confirm;
 
     // Install page.
     std::string install_dir;
@@ -1487,7 +1482,10 @@ private:
             settings_dirty = true;
             break;
         case SettingsModal::ResetDefaults:
-            reset_confirm_open = true;
+            OpenResetConfirm();
+            break;
+        case SettingsModal::ClearShaderCache:
+            OpenShaderCacheConfirm();
             break;
         default:
             break;
@@ -1561,17 +1559,45 @@ private:
         }
     }
 
-    void HandleResetConfirm(u64 down) {
+    void OpenResetConfirm() {
+        confirm = ConfirmPrompt{
+            "Reset all settings?",
+            {"All settings will be set to their default for this version,",
+             "with controller mappings included."},
+            "Your folders, titles, and saves are untouched.",
+            "Reset",
+            [this] {
+                ResetSettings();
+                // ResetSettings() has already written the defaults out.
+                settings_dirty = false;
+                ShowNotice("Settings reset to defaults", false);
+            }};
+    }
+
+    void OpenShaderCacheConfirm() {
+        confirm = ConfirmPrompt{
+            "Clear the shader cache?",
+            {"Every game's compiled shaders and pipelines will be deleted.",
+             "Expect stutter on your next run of a game."},
+            "Post-processing shaders are untouched.",
+            "Clear",
+            [this] {
+                const u64 freed = ClearShaderCache();
+                SetSettingsPage(settings_page);
+                ShowNotice("Shader cache cleared, " + FormatSize(freed) + " freed", false);
+            }};
+    }
+
+    void HandleConfirm(u64 down) {
         if (down & HidNpadButton_A) {
-            ResetSettings();
-            // ResetSettings() has already written the defaults out.
-            settings_dirty = false;
-            reset_confirm_open = false;
-            ShowNotice("Settings reset to defaults", false);
+            // The action outlives the prompt it came from, so it is moved out before closing.
+            const std::function<void()> action = std::move(confirm->on_accept);
+            confirm.reset();
+            action();
             return;
         }
         if (down & HidNpadButton_B) {
-            reset_confirm_open = false;
+            confirm.reset();
         }
     }
 
@@ -2213,8 +2239,8 @@ private:
         if (remap_open) {
             DrawRemapPage(c);
         }
-        if (reset_confirm_open) {
-            DrawResetConfirm(c);
+        if (confirm) {
+            DrawConfirm(c);
         }
         if (install_active) {
             DrawInstallProgress(c);
@@ -2526,24 +2552,30 @@ private:
         }
     }
 
-    void DrawResetConfirm(Canvas& c) {
+    void DrawConfirm(Canvas& c) {
+        const int body = 86 + 26 * static_cast<int>(confirm->lines.size());
+        const int note_y = confirm->note.empty() ? body : body + 8;
+        const int hint_y = note_y + (confirm->note.empty() ? 4 : 30);
+        const int h = hint_y + 38;
         const int w = std::min(620, g_screen_w - 48);
-        constexpr int h = 214;
         const int x = (g_screen_w - w) / 2;
         const int y = (g_screen_h - h) / 2;
         c.FillRect(0, 0, g_screen_w, g_screen_h, MakeColor(0x10, 0x11, 0x13, 0xC0));
         c.RoundBorder(x, y, w, h, 14, 2, kColBadge, kColSurface);
 
-        g_font.Draw(c, x + 24, y + 46, "Reset all settings?", 24, kColText);
-        g_font.Draw(c, x + 24, y + 86, "All settings will be set to their default for this version,", 18,
-                    kColTextDim);
-        g_font.Draw(c, x + 24, y + 112, "with controller mappings included.", 18, kColTextDim);
-        g_font.Draw(c, x + 24, y + 146, "Your folders, titles, and saves are untouched.", 18,
-                    kColAccent);
+        g_font.Draw(c, x + 24, y + 46, confirm->title, 24, kColText);
+        int line_y = y + 86;
+        for (const std::string& line : confirm->lines) {
+            g_font.Draw(c, x + 24, line_y, line, 18, kColTextDim);
+            line_y += 26;
+        }
+        if (!confirm->note.empty()) {
+            g_font.Draw(c, x + 24, y + note_y, confirm->note, 18, kColAccent);
+        }
 
         int hx = x + 24;
-        const int hy = y + h - 38;
-        hx += DrawHint(c, hx, hy, "A", "Reset") + 22;
+        const int hy = y + hint_y;
+        hx += DrawHint(c, hx, hy, "A", confirm->accept) + 22;
         DrawHint(c, hx, hy, "B", "Cancel");
     }
 

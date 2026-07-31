@@ -94,6 +94,14 @@ const char* TitleKindName(TitleKind kind);
 // Nicely formats a 3DS version string
 std::string FormatTitleVersion(std::uint16_t version);
 
+// Nicely formats a byte count.
+std::string FormatSize(std::uint64_t bytes);
+
+// The disk size of the compiled shader and pipeline caches.
+std::uint64_t GetShaderCacheSize();
+
+std::uint64_t ClearShaderCache();
+
 // The installed version of `program_id`, if that exact title is already on the emulated card.
 bool GetInstalledVersion(std::uint64_t program_id, std::uint16_t& version);
 
