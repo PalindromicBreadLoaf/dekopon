@@ -75,7 +75,7 @@ endif()
 nx_generate_nacp(OUTPUT dekopon.nacp
     NAME "Dekopon"
     AUTHOR "Azahar Team \& PalindromicBreadLoaf"
-    VERSION "2.0.0"
+    VERSION "2.1.0-RC1"
 )
 
 # Compile deko3d shaders with uam and pack them into the romfs.
