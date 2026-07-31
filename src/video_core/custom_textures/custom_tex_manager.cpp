@@ -121,7 +121,12 @@ void CustomTexManager::FindCustomTextures() {
             material->AddMapTexture(texture);
         }
     }
+    has_materials = !material_map.empty();
     textures_loaded = true;
+    if (!has_materials) {
+        LOG_INFO(Render, "No custom textures found for title {:016X}",
+                 title_id);
+    }
 }
 
 bool CustomTexManager::ParseFilename(const FileUtil::FSTEntry& file, CustomTexture* texture) {
@@ -291,7 +296,7 @@ void CustomTexManager::DumpTexture(const SurfaceParams& params, u32 level, std::
 Material* CustomTexManager::GetMaterial(u64 data_hash) {
     const auto it = material_map.find(data_hash);
     if (it == material_map.end()) {
-        LOG_WARNING(Render, "Unable to find replacement for surface with hash {:016X}", data_hash);
+        LOG_DEBUG(Render, "Unable to find replacement for surface with hash {:016X}", data_hash);
         return nullptr;
     }
     return it->second.get();
@@ -397,7 +402,8 @@ std::vector<FileUtil::FSTEntry> CustomTexManager::GetTextures(u64 title_id) {
 
 void CustomTexManager::CreateWorkers() {
     const std::size_t num_workers = std::max(std::thread::hardware_concurrency(), 2U) >> 1;
-    workers = std::make_unique<Common::ThreadWorker>(num_workers, "Custom textures");
+    workers.reset(
+        new Common::ThreadWorker{num_workers, "Custom textures", {}, {Common::Horizon::CoreFrontend}});
 }
 
 void CustomTexManager::ComputeMemoryBudget() {

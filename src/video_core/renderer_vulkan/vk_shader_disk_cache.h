@@ -11,6 +11,7 @@
 
 #include "common/common_types.h"
 #include "common/file_util.h"
+#include "common/horizon_thread.h"
 #include "common/thread_worker.h"
 #include "video_core/pica/shader_setup.h"
 #include "video_core/rasterizer_interface.h"
@@ -305,7 +306,9 @@ private:
         size_t cached_file_data_start{};
         std::vector<u8> cached_file_data;
         std::atomic<size_t> next_entry_id = SIZE_MAX;
-        Common::ThreadWorker append_worker{1, "Disk Shader Cache Append Worker"};
+        // Compresses and writes to the SD card.
+        Common::ThreadWorker append_worker{
+            1, "Disk Shader Cache Append Worker", {}, {Common::Horizon::CoreFrontend}};
     };
 
     std::string GetVSFile(u64 title_id, bool is_temp) const;

@@ -6,6 +6,7 @@
 
 #include "common/common_paths.h"
 #include "common/file_util.h"
+#include "common/horizon_thread.h"
 #include "common/logging/log.h"
 #include "common/microprofile.h"
 #include "common/scope_exit.h"
@@ -56,6 +57,15 @@ AttribLoadFlags MakeAttribLoadFlag(Pica::PipelineRegs::VertexAttributeFormat for
     }
 }
 
+std::size_t GetCompileWorkerCount() {
+#ifdef __SWITCH__
+    // Horizon only grants cores 0-2, of which core 1 is audio and core 2 is the guest JIT.
+    return 1;
+#else
+    return std::max(std::thread::hardware_concurrency(), 2U) / 2;
+#endif
+}
+
 constexpr std::array<vk::DescriptorSetLayoutBinding, 6> BUFFER_BINDINGS = {{
     {0, vk::DescriptorType::eUniformBufferDynamic, 1, vk::ShaderStageFlagBits::eVertex},
     {1, vk::DescriptorType::eUniformBufferDynamic, 1,
@@ -84,10 +94,11 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
                              RenderManager& renderpass_cache_, DescriptorUpdateQueue& update_queue_)
     : instance{instance_}, scheduler{scheduler_}, renderpass_cache{renderpass_cache_},
       update_queue{update_queue_},
-      num_worker_threads{std::max(std::thread::hardware_concurrency(), 2U) / 2},
-      // Keep shader/pipeline compilation off the CPU JIT core (2) so compile bursts don't stall emulation
-      pipeline_workers{num_worker_threads, "Pipeline workers", {}, {3, 0}},
-      shader_workers{num_worker_threads, "Shader workers", {}, {3, 0}},
+      num_worker_threads{GetCompileWorkerCount()},
+      // Keep shader/pipeline compilation off the CPU JIT core so compile bursts don't stall
+      // emulation, and off the audio core.
+      pipeline_workers{num_worker_threads, "Pipeline workers", {}, {Common::Horizon::CoreFrontend}},
+      shader_workers{num_worker_threads, "Shader workers", {}, {Common::Horizon::CoreFrontend}},
       descriptor_heaps{
           DescriptorHeap{instance, scheduler.GetMasterSemaphore(), BUFFER_BINDINGS, 32},
           DescriptorHeap{instance, scheduler.GetMasterSemaphore(), TEXTURE_BINDINGS<1>},
@@ -364,6 +375,27 @@ void PipelineCache::SwitchDiskCache(u64 title_id, const std::atomic_bool& stop_l
     }
 }
 
+void PipelineCache::WaitPipelineBuilt(GraphicsPipeline& pipeline) {
+    const auto start = std::chrono::steady_clock::now();
+    pipeline.WaitDone();
+    const auto now = std::chrono::steady_clock::now();
+
+    compile_stall += now - start;
+    compile_stall_count++;
+
+    if (now - last_stall_report < STALL_REPORT_INTERVAL) {
+        return;
+    }
+    const auto stall_ms = std::chrono::duration_cast<std::chrono::milliseconds>(compile_stall);
+    if (stall_ms >= MIN_REPORTED_STALL) {
+        LOG_INFO(Render_Vulkan, "Blocked {} ms on {} pipeline compiles", stall_ms.count(),
+                 compile_stall_count);
+    }
+    last_stall_report = now;
+    compile_stall = {};
+    compile_stall_count = 0;
+}
+
 bool PipelineCache::BindPipeline(PipelineInfo& info, bool wait_built) {
     MICROPROFILE_SCOPE(Vulkan_Bind);
 
@@ -372,8 +404,11 @@ bool PipelineCache::BindPipeline(PipelineInfo& info, bool wait_built) {
     }
 
     GraphicsPipeline* const pipeline = curr_disk_cache->GetPipeline(info);
-    if (!pipeline->IsDone() && !pipeline->TryBuild(wait_built)) {
-        return false;
+    if (!pipeline->IsDone()) {
+        if (!pipeline->TryBuild(wait_built)) {
+            return false;
+        }
+        WaitPipelineBuilt(*pipeline);
     }
 
     const bool is_dirty = scheduler.IsStateDirty(StateFlags::Pipeline);
@@ -480,9 +515,6 @@ bool PipelineCache::BindPipeline(PipelineInfo& info, bool wait_built) {
         }
 
         if (pipeline_dirty) {
-            if (!pipeline->IsDone()) {
-                pipeline->WaitDone();
-            }
             cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->Handle());
         }
 
