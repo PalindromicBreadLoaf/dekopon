@@ -415,8 +415,6 @@ void ApplyPreset(SwitchFrontend::SettingsPreset preset) {
     using SwitchFrontend::SettingsPreset;
     auto& v = Settings::values;
 
-    // The arena stays off by default while it is being investigated.
-    v.fastmem = preset != SettingsPreset::Default;
     if (preset == SettingsPreset::Default) {
         return;
     }
@@ -430,6 +428,8 @@ void ApplyPreset(SwitchFrontend::SettingsPreset preset) {
         return;
     }
 
+    // The arena stays off outside Ultra while it is being investigated.
+    v.fastmem = true;
     v.anisotropic_filtering = Settings::AnisotropicFiltering::Off;
     v.skip_slow_draw = true;
     v.skip_texture_copy = true;
