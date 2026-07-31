@@ -18,8 +18,8 @@ enum class QuickMenuAction {
 struct QuickMenuNav {
     bool up{};
     bool down{};
-    bool left{};
-    bool right{};
+    bool left{};  // Steps a value so the caller feeds it only the d-pad.
+    bool right{}; // ^
     bool confirm{};   // A
     bool cancel{};    // B
     bool alt{};       // X

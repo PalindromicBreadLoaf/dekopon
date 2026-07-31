@@ -164,17 +164,23 @@ void RunGame(PadState& pad, const std::string& rom) {
                                                                 : state);
 
             if (menu_open && !chord_edge) {
-                const SwitchFrontend::MenuDirections dirs = SwitchFrontend::RotateMenuDirections({
-                    .up = (pressed & (HidNpadButton_Up | HidNpadButton_StickLUp)) != 0,
-                    .down = (pressed & (HidNpadButton_Down | HidNpadButton_StickLDown)) != 0,
-                    .left = (pressed & (HidNpadButton_Left | HidNpadButton_StickLLeft)) != 0,
-                    .right = (pressed & (HidNpadButton_Right | HidNpadButton_StickLRight)) != 0,
+                const SwitchFrontend::MenuDirections dpad = SwitchFrontend::RotateMenuDirections({
+                    .up = (pressed & HidNpadButton_Up) != 0,
+                    .down = (pressed & HidNpadButton_Down) != 0,
+                    .left = (pressed & HidNpadButton_Left) != 0,
+                    .right = (pressed & HidNpadButton_Right) != 0,
+                });
+                const SwitchFrontend::MenuDirections stick = SwitchFrontend::RotateMenuDirections({
+                    .up = (pressed & HidNpadButton_StickLUp) != 0,
+                    .down = (pressed & HidNpadButton_StickLDown) != 0,
+                    .left = (pressed & HidNpadButton_StickLLeft) != 0,
+                    .right = (pressed & HidNpadButton_StickLRight) != 0,
                 });
                 const SwitchFrontend::QuickMenuNav nav{
-                    .up = dirs.up,
-                    .down = dirs.down,
-                    .left = dirs.left,
-                    .right = dirs.right,
+                    .up = dpad.up || stick.up,
+                    .down = dpad.down || stick.down,
+                    .left = dpad.left,
+                    .right = dpad.right,
                     .confirm = (pressed & HidNpadButton_A) != 0,
                     .cancel = (pressed & HidNpadButton_B) != 0,
                     .alt = (pressed & HidNpadButton_X) != 0,

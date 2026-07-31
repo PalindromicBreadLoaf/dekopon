@@ -416,6 +416,11 @@ struct Repeater {
 };
 enum { DirUp = 1, DirDown = 2, DirLeft = 4, DirRight = 8 };
 
+u32 NavMask(const MenuDirections& d) {
+    return (d.up ? DirUp : 0) | (d.down ? DirDown : 0) | (d.left ? DirLeft : 0) |
+           (d.right ? DirRight : 0);
+}
+
 enum class Tab { Library, Install, Settings, Paths, Artic };
 
 // Which pane the cursor lives in.
@@ -1011,13 +1016,25 @@ public:
 
             const HidAnalogStickState ls = padGetStickPos(&pad, 0);
             constexpr int dz = 12000;
-            const MenuDirections dirs = RotateMenuDirections({
-                .up = (down & HidNpadButton_Up) != 0 || ls.y > dz,
-                .down = (down & HidNpadButton_Down) != 0 || ls.y < -dz,
-                .left = (down & HidNpadButton_Left) != 0 || ls.x < -dz,
-                .right = (down & HidNpadButton_Right) != 0 || ls.x > dz,
+            // Rotated separately so that the split below stays in menu space: under a rotated menu
+            // a physical stick left is a menu up, and that still has to move the cursor.
+            const MenuDirections dpad = RotateMenuDirections({
+                .up = (down & HidNpadButton_Up) != 0,
+                .down = (down & HidNpadButton_Down) != 0,
+                .left = (down & HidNpadButton_Left) != 0,
+                .right = (down & HidNpadButton_Right) != 0,
             });
-            const u32 nav = repeater.Step(dirs.up, dirs.down, dirs.left, dirs.right);
+            const MenuDirections stick = RotateMenuDirections({
+                .up = ls.y > dz,
+                .down = ls.y < -dz,
+                .left = ls.x < -dz,
+                .right = ls.x > dz,
+            });
+            // Rows that cycle a value take `dpad_nav`, so a stray nudge while scrolling with the
+            // stick cannot change a setting.
+            const u32 dpad_nav = NavMask(dpad);
+            const u32 nav =
+                dpad_nav | repeater.Step(stick.up, stick.down, stick.left, stick.right);
 
             MenuResult result;
             bool done = false;
@@ -1030,7 +1047,7 @@ public:
             } else if (layout_picker_open) {
                 HandleLayoutPicker(down, nav);
             } else if (remap_open) {
-                HandleRemap(down, nav);
+                HandleRemap(down, nav, dpad_nav);
             } else if (details_open) {
                 const GameEntry& game = games[filtered[selected]];
                 if ((down & HidNpadButton_X) && game.insertable) {
@@ -1046,7 +1063,7 @@ public:
             } else if (tab == Tab::Install) {
                 HandleInstall(down, nav);
             } else if (tab == Tab::Settings) {
-                done = HandleSettings(down, nav);
+                done = HandleSettings(down, nav, dpad_nav);
             } else if (tab == Tab::Paths) {
                 done = HandlePaths(down, nav);
             } else {
@@ -1498,7 +1515,8 @@ private:
         }
     }
 
-    bool HandleSettings(u64 down, u32 nav) {
+    // `nav` moves the cursor; `dpad_nav` is the d-pad-only subset that is allowed to edit a value.
+    bool HandleSettings(u64 down, u32 nav, u32 dpad_nav) {
         if (down & HidNpadButton_L) {
             StepSettingsPage(-1);
         }
@@ -1524,7 +1542,7 @@ private:
 
         const SettingsRow& row = settings_rows[sel];
         if (row.modal != SettingsModal::None) {
-            if ((down & HidNpadButton_A) || (nav & DirRight)) {
+            if ((down & HidNpadButton_A) || (dpad_nav & DirRight)) {
                 OpenSettingsModal(row.modal);
             }
             if (down & HidNpadButton_B) {
@@ -1534,11 +1552,11 @@ private:
         }
 
         // Settings::values is edited live. FlushSettings() only batches the config.ini write.
-        if (nav & DirLeft) {
+        if (dpad_nav & DirLeft) {
             row.step(-1);
             settings_dirty = true;
         }
-        if ((nav & DirRight) || (down & HidNpadButton_A)) {
+        if ((dpad_nav & DirRight) || (down & HidNpadButton_A)) {
             row.step(+1);
             settings_dirty = true;
         }
@@ -1658,7 +1676,7 @@ private:
         SetMapping(control, static_cast<InputButton>(next));
     }
 
-    void HandleRemap(u64 down, u32 nav) {
+    void HandleRemap(u64 down, u32 nav, u32 dpad_nav) {
         if (nav & DirUp) {
             remap_sel = (remap_sel - 1 + NumMappableControls) % NumMappableControls;
         }
@@ -1668,10 +1686,10 @@ private:
         ScrollRemapIntoView();
 
         const auto control = static_cast<MappableControl>(remap_sel);
-        if (nav & DirLeft) {
+        if (dpad_nav & DirLeft) {
             StepRemapMapping(control, -1);
         }
-        if ((nav & DirRight) || (down & HidNpadButton_A)) {
+        if ((dpad_nav & DirRight) || (down & HidNpadButton_A)) {
             StepRemapMapping(control, +1);
         }
         if (down & HidNpadButton_X) {
