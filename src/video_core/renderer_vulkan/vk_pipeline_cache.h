@@ -5,6 +5,7 @@
 #pragma once
 
 #include <bitset>
+#include <chrono>
 
 #include "video_core/rasterizer_interface.h"
 #include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
@@ -137,7 +138,13 @@ private:
     /// Returns the transferable shader dir
     std::string GetTransferableDir() const;
 
+    /// Blocks until pipeline has finished compiling, accounting for the time lost.
+    void WaitPipelineBuilt(GraphicsPipeline& pipeline);
+
 private:
+    static constexpr auto STALL_REPORT_INTERVAL = std::chrono::seconds{1};
+    static constexpr auto MIN_REPORTED_STALL = std::chrono::milliseconds{100};
+
     const Instance& instance;
     Scheduler& scheduler;
     RenderManager& renderpass_cache;
@@ -154,6 +161,10 @@ private:
     std::array<DescriptorHeap, NumDescriptorHeaps> descriptor_heaps;
     std::array<vk::DescriptorSet, NumRasterizerSets> bound_descriptor_sets{};
     std::array<u32, NumDynamicOffsets> offsets{};
+
+    std::chrono::steady_clock::duration compile_stall{};
+    std::chrono::steady_clock::time_point last_stall_report{std::chrono::steady_clock::now()};
+    u32 compile_stall_count{};
 
     std::array<u64, MAX_SHADER_STAGES> shader_hashes;
     std::array<Shader*, MAX_SHADER_STAGES> current_shaders;
