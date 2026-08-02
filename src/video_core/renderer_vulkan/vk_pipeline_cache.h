@@ -141,6 +141,8 @@ private:
     /// Blocks until pipeline has finished compiling, accounting for the time lost.
     void WaitPipelineBuilt(GraphicsPipeline& pipeline);
 
+    void WaitForCompileWorkers();
+
 private:
     static constexpr auto STALL_REPORT_INTERVAL = std::chrono::seconds{1};
     static constexpr auto MIN_REPORTED_STALL = std::chrono::milliseconds{100};
@@ -154,6 +156,7 @@ private:
     vk::UniquePipelineCache driver_pipeline_cache;
     vk::UniquePipelineLayout pipeline_layout;
     std::size_t num_worker_threads;
+    const bool async_shader_compilation;
     Common::ThreadWorker pipeline_workers;
     Common::ThreadWorker shader_workers;
     PipelineInfo current_info{};

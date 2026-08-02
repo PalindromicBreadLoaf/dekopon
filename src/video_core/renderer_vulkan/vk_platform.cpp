@@ -317,9 +317,9 @@ vk::UniqueInstance CreateInstance(const Common::DynamicLibrary& library,
                                   Frontend::WindowSystemType window_type, bool enable_validation,
                                   bool dump_command_buffers) {
 #ifdef __SWITCH__
-    // NVK gates device creation behind these vars.
+    // NVK gates device creation behind this var.
     setenv("NVK_I_WANT_A_BROKEN_VULKAN_DRIVER", "1", 1);
-    setenv("MESA_SHADER_CACHE_DISABLE", "1", 1);
+    setenv("MESA_SHADER_CACHE_DISABLE", "false", 1);
 
     const auto vkGetInstanceProcAddr =
         reinterpret_cast<PFN_vkGetInstanceProcAddr>(&vk_icdGetInstanceProcAddr);
