@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <functional>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <type_traits>
@@ -41,10 +42,11 @@ public:
     // Round-robin threads across cores rather than assigning to the first available core.
     explicit StatefulThreadWorker(std::size_t num_workers, std::string_view name,
                                   StateMaker func = {},
-                                  std::vector<std::uint32_t> preferred_cores = {})
+                                  std::vector<std::uint32_t> preferred_cores = {},
+                                  std::optional<ThreadPriority> priority = std::nullopt)
         : workers_queued{num_workers}, thread_name{name} {
-        const auto lambda = [this, func, cores = std::move(preferred_cores)](
-                                std::stop_token stop_token, std::size_t index) {
+        const auto lambda = [this, func, cores = std::move(preferred_cores),
+                             priority](std::stop_token stop_token, std::size_t index) {
             Common::SetCurrentThreadName(thread_name.data());
             if (!cores.empty()) {
                 const std::uint32_t assigned = cores[index % cores.size()];
@@ -55,6 +57,9 @@ public:
                         }
                     }
                 }
+            }
+            if (priority) {
+                Common::SetCurrentThreadPriority(*priority);
             }
             {
                 [[maybe_unused]] std::conditional_t<with_state, StateType, int> state{func(index)};

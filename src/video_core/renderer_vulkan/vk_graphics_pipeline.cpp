@@ -89,6 +89,23 @@ bool GraphicsPipeline::TryBuild(bool wait_built) {
         return wait_built;
     }
 
+    const auto queue_build = [this] {
+        VideoCore::NotifyShaderCompileBegin();
+        is_pending = true;
+        worker->QueueWork([this] {
+            Build();
+            VideoCore::NotifyShaderCompileEnd();
+        });
+    };
+
+#ifdef __SWITCH__
+    // Keep the driver's cache lookup off the render thread in asynchronous mode.
+    if (!wait_built) {
+        queue_build();
+        return false;
+    }
+#endif
+
     // If the shaders haven't been compiled yet, we cannot proceed.
     const bool shaders_pending = std::any_of(
         stages.begin(), stages.end(), [](Shader* shader) { return shader && !shader->IsDone(); });
@@ -102,12 +119,7 @@ bool GraphicsPipeline::TryBuild(bool wait_built) {
     }
 
     // Fallback to (a)synchronous compilation
-    VideoCore::NotifyShaderCompileBegin();
-    worker->QueueWork([this] {
-        Build();
-        VideoCore::NotifyShaderCompileEnd();
-    });
-    is_pending = true;
+    queue_build();
     return wait_built;
 }
 

@@ -93,12 +93,22 @@ constexpr std::array<vk::DescriptorSetLayoutBinding, 2> UTILITY_BINDINGS = {{
 PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
                              RenderManager& renderpass_cache_, DescriptorUpdateQueue& update_queue_)
     : instance{instance_}, scheduler{scheduler_}, renderpass_cache{renderpass_cache_},
-      update_queue{update_queue_},
-      num_worker_threads{GetCompileWorkerCount()},
-      // Keep shader/pipeline compilation off the CPU JIT core so compile bursts don't stall
-      // emulation, and off the audio core.
-      pipeline_workers{num_worker_threads, "Pipeline workers", {}, {Common::Horizon::CoreFrontend}},
-      shader_workers{num_worker_threads, "Shader workers", {}, {Common::Horizon::CoreFrontend}},
+      update_queue{update_queue_}, num_worker_threads{GetCompileWorkerCount()},
+#ifdef __SWITCH__
+      pipeline_workers{num_worker_threads,
+                       "Pipeline workers",
+                       {},
+                       {Common::Horizon::CoreAudio},
+                       Common::ThreadPriority::Low},
+      shader_workers{num_worker_threads,
+                     "Shader workers",
+                     {},
+                     {Common::Horizon::CoreFrontend},
+                     Common::ThreadPriority::Low},
+#else
+      pipeline_workers{num_worker_threads, "Pipeline workers"},
+      shader_workers{num_worker_threads, "Shader workers"},
+#endif
       descriptor_heaps{
           DescriptorHeap{instance, scheduler.GetMasterSemaphore(), BUFFER_BINDINGS, 32},
           DescriptorHeap{instance, scheduler.GetMasterSemaphore(), TEXTURE_BINDINGS<1>},
