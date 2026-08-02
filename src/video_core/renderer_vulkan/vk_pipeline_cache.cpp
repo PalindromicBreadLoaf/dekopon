@@ -66,6 +66,13 @@ std::size_t GetCompileWorkerCount() {
 #endif
 }
 
+#ifdef __SWITCH__
+Common::ThreadPriority GetCompileWorkerPriority(bool async_shader_compilation) {
+    return async_shader_compilation ? Common::ThreadPriority::Low
+                                    : Common::ThreadPriority::Normal;
+}
+#endif
+
 constexpr std::array<vk::DescriptorSetLayoutBinding, 6> BUFFER_BINDINGS = {{
     {0, vk::DescriptorType::eUniformBufferDynamic, 1, vk::ShaderStageFlagBits::eVertex},
     {1, vk::DescriptorType::eUniformBufferDynamic, 1,
@@ -94,17 +101,18 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
                              RenderManager& renderpass_cache_, DescriptorUpdateQueue& update_queue_)
     : instance{instance_}, scheduler{scheduler_}, renderpass_cache{renderpass_cache_},
       update_queue{update_queue_}, num_worker_threads{GetCompileWorkerCount()},
+      async_shader_compilation{Settings::values.async_shader_compilation.GetValue()},
 #ifdef __SWITCH__
       pipeline_workers{num_worker_threads,
                        "Pipeline workers",
                        {},
                        {Common::Horizon::CoreAudio},
-                       Common::ThreadPriority::Low},
+                       GetCompileWorkerPriority(async_shader_compilation)},
       shader_workers{num_worker_threads,
                      "Shader workers",
                      {},
                      {Common::Horizon::CoreFrontend},
-                     Common::ThreadPriority::Low},
+                     GetCompileWorkerPriority(async_shader_compilation)},
 #else
       pipeline_workers{num_worker_threads, "Pipeline workers"},
       shader_workers{num_worker_threads, "Shader workers"},
@@ -167,15 +175,23 @@ void PipelineCache::BuildLayout() {
 }
 
 PipelineCache::~PipelineCache() {
-    pipeline_workers.WaitForRequests();
-    shader_workers.WaitForRequests();
+    WaitForCompileWorkers();
     SaveDriverPipelineDiskCache();
+}
+
+void PipelineCache::WaitForCompileWorkers() {
+    shader_workers.WaitForRequests();
+    pipeline_workers.WaitForRequests();
 }
 
 void PipelineCache::LoadCache(const std::atomic_bool& stop_loading,
                               const VideoCore::DiskResourceLoadCallback& callback) {
+    WaitForCompileWorkers();
     LoadDriverPipelineDiskCache(stop_loading, callback);
     LoadDiskCache(stop_loading, callback);
+    if (!async_shader_compilation && !stop_loading.load()) {
+        WaitForCompileWorkers();
+    }
 }
 
 void PipelineCache::SwitchCache(u64 title_id, const std::atomic_bool& stop_loading,
@@ -186,6 +202,11 @@ void PipelineCache::SwitchCache(u64 title_id, const std::atomic_bool& stop_loadi
                   title_id);
         return;
     }
+
+    // GraphicsPipeline jobs retain pointers into the current ShaderDiskCache and a raw handle to
+    // driver_pipeline_cache. Finish them before replacing the driver cache or allowing
+    // SwitchDiskCache to erase the old manager.
+    WaitForCompileWorkers();
 
     // Make sure we have a valid pipeline cache before switching
     if (!driver_pipeline_cache) {
@@ -207,6 +228,9 @@ void PipelineCache::SwitchCache(u64 title_id, const std::atomic_bool& stop_loadi
 
     // Switch the disk shader cache after driver cache is switched
     SwitchDiskCache(title_id, stop_loading, callback);
+    if (!async_shader_compilation && !stop_loading.load()) {
+        WaitForCompileWorkers();
+    }
 }
 
 void PipelineCache::LoadDriverPipelineDiskCache(
