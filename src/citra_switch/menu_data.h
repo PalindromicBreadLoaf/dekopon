@@ -79,6 +79,11 @@ struct DirEntry {
     std::string path; // Absolute SD path with a trailing '/'.
 };
 
+struct AmiiboEntry {
+    std::string name;
+    std::string path;
+};
+
 // Scans the configured ROM directory and the installed SD titles, sorted by title.
 std::vector<GameEntry> ScanGames();
 
@@ -107,6 +112,9 @@ bool GetInstalledVersion(std::uint64_t program_id, std::uint16_t& version);
 
 // The .cia/.zcia files in `directory`, sorted by name.
 std::vector<CiaEntry> ListCiaFiles(const std::string& directory);
+
+// The .bin files in the amiibo directory, sorted by name.
+std::vector<AmiiboEntry> ListAmiiboFiles();
 
 // Installs `path` into the emulated NAND/SD title tree, calling `progress` with
 // (bytes_written, total_bytes) as it runs.

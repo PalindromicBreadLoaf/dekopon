@@ -5,15 +5,20 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <mutex>
 #include <string>
 #include <vector>
 
 #include "citra_switch/config.h"
+#include "citra_switch/menu_data.h"
 #include "citra_switch/overlay_menu.h"
 #include "citra_switch/settings_menu.h"
 #include "core/cheats/cheat_base.h"
 #include "core/cheats/cheats.h"
 #include "core/core.h"
+#include "core/hle/kernel/kernel.h"
+#include "core/hle/service/nfc/nfc.h"
+#include "core/hle/service/sm/sm.h"
 #include "core/loader/loader.h"
 #include "core/savestate.h"
 #include "video_core/overlay.h"
@@ -29,6 +34,9 @@ enum class Item {
     Cheat,
     CheatsEmpty,
     SaveStateSlot,
+    AmiiboFile,
+    AmiibosEmpty,
+    RemoveAmiibo,
     Resume,
     ExitGame,
 };
@@ -49,11 +57,13 @@ enum class Page {
     System,
     States,
     Cheats,
+    Amiibo,
 };
 
-constexpr std::array<Page, NumQuickPages + 2> kPages = {Page::Display, Page::Graphics, Page::Stereo,
-                                                        Page::Audio,   Page::Input,    Page::System,
-                                                        Page::States,  Page::Cheats};
+constexpr std::array<Page, NumQuickPages + 3> kPages = {
+    Page::Display, Page::Graphics, Page::Stereo, Page::Audio,  Page::Input,
+    Page::System,  Page::States,   Page::Cheats, Page::Amiibo,
+};
 
 static_assert(static_cast<int>(Page::States) == NumQuickPages,
               "the settings pages have to lead, in QuickPage order");
@@ -68,6 +78,8 @@ const char* PageName(Page page) {
         return "States";
     case Page::Cheats:
         return "Cheats";
+    case Page::Amiibo:
+        return "Amiibo";
     default:
         return QuickPageName(static_cast<QuickPage>(page));
     }
@@ -79,14 +91,18 @@ constexpr int kCheatsPerPage = 8;
 // Save state slots past this many spill onto further sub-pages.
 constexpr int kSlotsPerPage = 8;
 
+constexpr int kAmiibosPerPage = 7;
+
 std::atomic<bool> s_open{false};
 std::atomic<bool> s_pause_in_menu{false};
 int s_page = 0;
 int s_selected = 0;
 int s_cheat_page = 0;
 int s_state_page = 0;
+int s_amiibo_page = 0;
 std::vector<Row> s_rows;
 std::vector<SettingsRow> s_settings;
+std::vector<AmiiboEntry> s_amiibos;
 bool s_cheats_dirty = false;
 
 // Slot status strings.
@@ -101,6 +117,65 @@ void RefreshSaveStates() {
 
 int StatePageCount() {
     return (static_cast<int>(Core::SaveStateSlotCount) + kSlotsPerPage - 1) / kSlotsPerPage;
+}
+
+void RefreshAmiibos() {
+    s_amiibos = ListAmiiboFiles();
+}
+
+int AmiiboPageCount() {
+    const int count = static_cast<int>(s_amiibos.size());
+    return count <= 0 ? 1 : (count + kAmiibosPerPage - 1) / kAmiibosPerPage;
+}
+
+bool LoadAmiibo(const std::string& path) {
+    auto& system = Core::System::GetInstance();
+    if (!system.IsPoweredOn()) {
+        VideoCore::PostOverlayToast("No game is running");
+        return false;
+    }
+    auto nfc = system.ServiceManager().GetService<Service::NFC::Module::Interface>("nfc:u");
+    if (!nfc) {
+        VideoCore::PostOverlayToast("The NFC service is unavailable");
+        return false;
+    }
+
+    std::scoped_lock lock{system.Kernel().GetHLELock()};
+    if (nfc->IsTagActive()) {
+        VideoCore::PostOverlayToast("An Amiibo is already active");
+        return false;
+    }
+    if (!nfc->IsSearchingForAmiibos()) {
+        VideoCore::PostOverlayToast("The game is not scanning for Amiibo");
+        return false;
+    }
+    if (!nfc->LoadAmiibo(path)) {
+        VideoCore::PostOverlayToast("Could not load the Amiibo file");
+        return false;
+    }
+    VideoCore::PostOverlayToast("Amiibo loaded");
+    return true;
+}
+
+void RemoveAmiibo() {
+    auto& system = Core::System::GetInstance();
+    if (!system.IsPoweredOn()) {
+        VideoCore::PostOverlayToast("No game is running");
+        return;
+    }
+    auto nfc = system.ServiceManager().GetService<Service::NFC::Module::Interface>("nfc:u");
+    if (!nfc) {
+        VideoCore::PostOverlayToast("The NFC service is unavailable");
+        return;
+    }
+
+    std::scoped_lock lock{system.Kernel().GetHLELock()};
+    if (!nfc->IsTagActive()) {
+        VideoCore::PostOverlayToast("No Amiibo is active");
+        return;
+    }
+    nfc->RemoveAmiibo();
+    VideoCore::PostOverlayToast("Amiibo removed");
 }
 
 Page CurrentPage() {
@@ -192,7 +267,7 @@ void RebuildRows() {
         for (int slot = first; slot < last; ++slot) {
             s_rows.push_back({Item::SaveStateSlot, slot});
         }
-    } else {
+    } else if (page == Page::Cheats) {
         const int count = CheatCount();
         s_cheat_page = std::clamp(s_cheat_page, 0, CheatPageCount() - 1);
         const int first = s_cheat_page * kCheatsPerPage;
@@ -203,6 +278,17 @@ void RebuildRows() {
         if (s_rows.empty()) {
             s_rows.push_back({Item::CheatsEmpty});
         }
+    } else {
+        s_amiibo_page = std::clamp(s_amiibo_page, 0, AmiiboPageCount() - 1);
+        const int first = s_amiibo_page * kAmiibosPerPage;
+        const int last = std::min(static_cast<int>(s_amiibos.size()), first + kAmiibosPerPage);
+        for (int i = first; i < last; ++i) {
+            s_rows.push_back({Item::AmiiboFile, i});
+        }
+        if (s_amiibos.empty()) {
+            s_rows.push_back({Item::AmiibosEmpty});
+        }
+        s_rows.push_back({Item::RemoveAmiibo});
     }
     s_selected = std::clamp(s_selected, 0, static_cast<int>(s_rows.size()) - 1);
 }
@@ -228,6 +314,12 @@ std::string Label(const Row& row) {
         return "No cheats loaded";
     case Item::SaveStateSlot:
         return SaveStateSlotName(static_cast<unsigned int>(row.index));
+    case Item::AmiiboFile:
+        return s_amiibos[static_cast<std::size_t>(row.index)].name;
+    case Item::AmiibosEmpty:
+        return "No .bin files in amiibo/";
+    case Item::RemoveAmiibo:
+        return "Remove active Amiibo";
     case Item::Resume:
         return "Resume Game";
     case Item::ExitGame:
@@ -297,6 +389,15 @@ void Repaint() {
                 "  List " + std::to_string(s_state_page + 1) + "/" + std::to_string(state_pages);
         }
         state.hint = "A Load   X Save   Y Delete   ZL/ZR List   L/R Page";
+    } else if (CurrentPage() == Page::Amiibo) {
+        const int amiibo_pages = AmiiboPageCount();
+        if (amiibo_pages > 1) {
+            state.title +=
+                "  List " + std::to_string(s_amiibo_page + 1) + "/" + std::to_string(amiibo_pages);
+            state.hint = "A Load/Remove   L/R Page   ZL/ZR List";
+        } else {
+            state.hint = "A Load/Remove   L/R Page";
+        }
     } else {
         state.hint = "A Change   L/R Page   +/- Close";
     }
@@ -331,7 +432,9 @@ void OpenQuickMenu() {
     s_selected = 0;
     s_cheat_page = 0;
     s_state_page = 0;
+    s_amiibo_page = 0;
     RefreshSaveStates();
+    RefreshAmiibos();
     RebuildRows();
     s_open.store(true, std::memory_order_relaxed);
     if (IsPauseInQuickMenu()) {
@@ -380,6 +483,8 @@ QuickMenuAction UpdateQuickMenu(const QuickMenuNav& nav) {
         s_selected = 0;
         if (CurrentPage() == Page::States) {
             RefreshSaveStates();
+        } else if (CurrentPage() == Page::Amiibo) {
+            RefreshAmiibos();
         }
         RebuildRows();
         changed = true;
@@ -400,6 +505,15 @@ QuickMenuAction UpdateQuickMenu(const QuickMenuNav& nav) {
         const int pages = StatePageCount();
         const int dir = nav.page_next ? 1 : -1;
         s_state_page = (s_state_page + dir + pages) % pages;
+        s_selected = 0;
+        RebuildRows();
+        changed = true;
+    }
+
+    if (CurrentPage() == Page::Amiibo && (nav.page_prev || nav.page_next)) {
+        const int pages = AmiiboPageCount();
+        const int dir = nav.page_next ? 1 : -1;
+        s_amiibo_page = (s_amiibo_page + dir + pages) % pages;
         s_selected = 0;
         RebuildRows();
         changed = true;
@@ -448,6 +562,20 @@ QuickMenuAction UpdateQuickMenu(const QuickMenuNav& nav) {
             RefreshSaveStates();
         }
         RebuildRows();
+        Repaint();
+        return QuickMenuAction::None;
+    }
+
+    if (row.item == Item::AmiiboFile && nav.confirm) {
+        if (LoadAmiibo(s_amiibos[static_cast<std::size_t>(row.index)].path)) {
+            CloseQuickMenu();
+            return QuickMenuAction::Close;
+        }
+        Repaint();
+        return QuickMenuAction::None;
+    }
+    if (row.item == Item::RemoveAmiibo && nav.confirm) {
+        RemoveAmiibo();
         Repaint();
         return QuickMenuAction::None;
     }

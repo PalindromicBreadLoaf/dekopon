@@ -429,6 +429,28 @@ std::vector<CiaEntry> ListCiaFiles(const std::string& directory) {
     return out;
 }
 
+std::vector<AmiiboEntry> ListAmiiboFiles() {
+    std::vector<AmiiboEntry> out;
+    const std::string directory = GetActiveUserDir() + "amiibo/";
+    FileUtil::ForeachDirectoryEntry(
+        nullptr, directory, [&out](u64*, const std::string& dir, const std::string& virtual_name) {
+            const std::string path = dir + virtual_name;
+            if (FileUtil::IsDirectory(path)) {
+                return true;
+            }
+            std::string extension;
+            Common::SplitPath(path, nullptr, nullptr, &extension);
+            if (Common::ToLower(extension) == ".bin") {
+                out.push_back({virtual_name, path});
+            }
+            return true;
+        });
+    std::sort(out.begin(), out.end(), [](const AmiiboEntry& a, const AmiiboEntry& b) {
+        return Common::ToLower(a.name) < Common::ToLower(b.name);
+    });
+    return out;
+}
+
 InstallResult InstallCia(const std::string& path,
                          const std::function<void(std::size_t, std::size_t)>& progress) {
     const Service::AM::InstallStatus status = Service::AM::InstallCIA(

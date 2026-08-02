@@ -445,6 +445,7 @@ int Bootstrap() {
     FileUtil::SetUserPath(ReadUserDirPointer());
     s_active_user_dir = FileUtil::GetUserPath(FileUtil::UserPath::UserDir);
     s_paths.user_dir = s_active_user_dir;
+    FileUtil::CreateFullPath(s_active_user_dir + "amiibo/");
 
     Common::Log::Initialize();
     Common::Log::Start();
