@@ -159,9 +159,7 @@ vk::ImageSubresourceRange MakeSubresourceRange(vk::ImageAspectFlags aspect, u32 
 }
 
 #ifdef __SWITCH__
-// The ring only has to be wide enough for the largest single custom texture level
-// (4096x4096 RGBA8) to fit in one mapping.
-constexpr u64 UPLOAD_BUFFER_SIZE = 64_MiB;
+constexpr u64 UPLOAD_BUFFER_SIZE = 96_MiB;
 #else
 constexpr u64 UPLOAD_BUFFER_SIZE = 512_MiB;
 #endif

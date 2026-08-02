@@ -34,8 +34,8 @@ using namespace Pica::Shader::Generator;
 
 #ifdef __SWITCH__
 // NXVK backs host visible memory with plain system allocations, so a ring only costs what it
-// reserves. 32 MiB is far above what a frame of PICA geometry streams.
-constexpr u64 STREAM_BUFFER_SIZE = 32_MiB;
+// reserves.
+constexpr u64 STREAM_BUFFER_SIZE = 48_MiB;
 #else
 constexpr u64 STREAM_BUFFER_SIZE = 64_MiB;
 #endif
