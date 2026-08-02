@@ -10,6 +10,11 @@
 
 Many many thanks to the Azahar team for creating such an amazing project in the first place.
 
+<p align="center">
+  <a href="https://ko-fi.com/palindromicbreadloaf">Support Dekopon development on Ko-fi</a>
+</p>
+
+
 # Project status
 
 Currently, the project boots and runs games at mostly full speed (see the compatibility list for details: https://cryptpad.fr/sheet/#/2/sheet/view/PJKtoq0haezswSwH8qgEJkp7NWO57qNNL7cq04JsJAM/)\
