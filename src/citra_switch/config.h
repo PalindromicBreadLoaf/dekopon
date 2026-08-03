@@ -85,6 +85,17 @@ void SetUpdateChannel(UpdateChannel channel);
 const std::string& GetDismissedUpdateTag();
 void DismissUpdateTag(const std::string& tag);
 
+// The build that last got as far as the launcher.
+const std::string& GetLastSeenVersion();
+void RecordSeenVersion(const std::string& version);
+
+// Whether a version change puts the What's New card up.
+bool IsWhatsNewCardEnabled();
+void SetWhatsNewCardEnabled(bool enabled);
+
+// How many times Dekopon has been started.
+int GetLaunchCount();
+
 struct MenuDirections {
     bool up{};
     bool down{};

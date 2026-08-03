@@ -129,6 +129,10 @@ menu_rotate_input = false
 update_channel = 0
 # Release tag declined at the automatic startup prompt. Manual checks ignore this value.
 dismissed_update =
+# Build that last reached the launcher. Shows the What's New card once when it changes.
+last_seen_version =
+# Show the release notes card the first time a new version is launched (1, default).
+show_whats_new = true
 
 [Camera]
 # PNG or JPEG the emulated cameras show.. Anything in the camera/ folder is offered.

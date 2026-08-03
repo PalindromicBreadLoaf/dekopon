@@ -19,7 +19,10 @@
 #include <curl/curl.h>
 #include <cryptopp/sha.h>
 #include <json.hpp>
+#include "citra_switch/config.h"
+#include "common/file_util.h"
 #include "common/logging/log.h"
+#include "common/string_util.h"
 
 #ifndef DEKOPON_VERSION
 #define DEKOPON_VERSION "0.0.0"
@@ -34,6 +37,7 @@ constexpr std::string_view kUserAgent = "Dekopon-Updater/" DEKOPON_VERSION;
 constexpr long kConnectTimeoutSeconds = 15;
 constexpr long kRequestTimeoutSeconds = 30;
 constexpr std::uint32_t kNroMagic = 0x304F524E;
+constexpr std::string_view kNotesFileName = "release_notes.txt";
 std::string s_executable_path;
 
 struct VersionPart {
@@ -282,6 +286,7 @@ std::optional<UpdateRelease> ParseRelease(const nlohmann::json& release) try {
     UpdateRelease out;
     out.tag = release.value("tag_name", "");
     out.name = release.value("name", out.tag);
+    out.notes = release.value("body", "");
     out.prerelease = release.value("prerelease", false);
     if (out.tag.empty()) {
         return std::nullopt;
@@ -367,6 +372,10 @@ std::string ErrnoMessage(const char* action) {
     return std::string{action} + ": " + std::strerror(errno);
 }
 
+std::string NotesPath() {
+    return GetActiveUserDir() + std::string{kNotesFileName};
+}
+
 } // namespace
 
 const char* CurrentVersion() {
@@ -422,7 +431,14 @@ UpdateCheckResult CheckForUpdate(UpdateChannel channel, const std::atomic<bool>*
     std::optional<UpdateRelease> newest;
     for (const auto& item : releases) {
         std::optional<UpdateRelease> release = ParseRelease(item);
-        if (!release || (release->prerelease && channel == UpdateChannel::Stable)) {
+        if (!release) {
+            continue;
+        }
+        if (result.current_notes.empty() &&
+            CompareReleaseVersions(release->tag, CurrentVersion()) == 0) {
+            result.current_notes = release->notes;
+        }
+        if (release->prerelease && channel == UpdateChannel::Stable) {
             continue;
         }
         if (!newest || CompareReleaseVersions(release->tag, newest->tag) > 0) {
@@ -546,6 +562,33 @@ UpdateInstallResult InstallUpdate(const UpdateRelease& release,
     LOG_INFO(Frontend, "Updated Dekopon {} -> {}, backup at {}", CurrentVersion(), release.tag,
              backup);
     return result;
+}
+
+CachedReleaseNotes LoadCachedReleaseNotes() {
+    CachedReleaseNotes cached;
+    std::string contents;
+    if (FileUtil::ReadFileToString(true, NotesPath(), contents) == 0) {
+        return cached;
+    }
+    const std::size_t newline = contents.find('\n');
+    if (newline == std::string::npos) {
+        return cached;
+    }
+    cached.tag = Common::StripSpaces(contents.substr(0, newline));
+    cached.notes = contents.substr(newline + 1);
+    return cached;
+}
+
+void CacheReleaseNotes(const std::string& tag, const std::string& notes) {
+    if (tag.empty() || GetActiveUserDir().empty()) {
+        return;
+    }
+    // Every launch's update check lands here, so the SD write only happens on a real change.
+    const CachedReleaseNotes cached = LoadCachedReleaseNotes();
+    if (cached.tag == tag && cached.notes == notes) {
+        return;
+    }
+    FileUtil::WriteStringToFile(true, NotesPath(), tag + '\n' + notes);
 }
 
 } // namespace SwitchFrontend

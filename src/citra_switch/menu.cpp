@@ -1002,6 +1002,243 @@ void DrawTitleDetails(Canvas& c, const GameEntry& game, const TitleDetails& deta
     DrawHint(c, hx, hy, "B", "Close");
 }
 
+// A card of short pages flipped through with L/R. Carries the welcome tour on a first
+// run and the release notes after an update.
+struct InfoPage {
+    std::string heading;
+    std::vector<std::string> lines;
+};
+
+struct InfoCard {
+    std::string title;
+    std::vector<InfoPage> pages;
+    int page = 0;
+};
+
+constexpr int kInfoBodySize = 18;
+constexpr int kInfoLineH = 26;
+constexpr int kInfoLines = 8;
+constexpr int kInfoBodyTop = 112; // Baseline of the first body line.
+
+constexpr std::string_view kKofiUrl = "ko-fi.com/palindromicbreadloaf";
+
+int InfoCardW() {
+    return std::min(720, g_screen_w - 48);
+}
+
+int InfoCardH() {
+    return kInfoBodyTop + kInfoLines * kInfoLineH + 74;
+}
+
+int InfoCardTextW() {
+    return InfoCardW() - 48;
+}
+
+std::vector<std::string> WrapText(const std::string& text, int max_w) {
+    if (text.empty()) {
+        return {std::string{}};
+    }
+    // Continuation lines of a bullet line up under its text rather than its dash.
+    const std::string indent = text.rfind("- ", 0) == 0 ? "   " : "";
+    std::vector<std::string> out;
+    std::string line;
+    std::size_t pos = 0;
+    while (true) {
+        const std::size_t space = text.find(' ', pos);
+        const std::string word = text.substr(pos, space - pos);
+        if (!word.empty()) {
+            const std::string candidate = line.empty() ? word : line + ' ' + word;
+            if (!line.empty() && g_font.Measure(candidate, kInfoBodySize) > max_w) {
+                out.push_back(std::move(line));
+                line = indent + word;
+            } else {
+                line = candidate;
+            }
+        }
+        if (space == std::string::npos) {
+            break;
+        }
+        pos = space + 1;
+    }
+    if (!line.empty()) {
+        out.push_back(std::move(line));
+    }
+    for (std::string& wrapped : out) {
+        wrapped = g_font.Truncate(wrapped, kInfoBodySize, max_w);
+    }
+    return out;
+}
+
+InfoPage MakeInfoPage(std::string heading, std::initializer_list<std::string> body, int max_w) {
+    InfoPage page{std::move(heading), {}};
+    for (const std::string& text : body) {
+        for (std::string& line : WrapText(text, max_w)) {
+            page.lines.push_back(std::move(line));
+        }
+    }
+    return page;
+}
+
+// Release bodies are written in Markdown
+std::string FlattenMarkdown(std::string_view line) {
+    while (!line.empty() && (line.back() == '\r' || line.back() == ' ' || line.back() == '\t')) {
+        line.remove_suffix(1);
+    }
+    std::size_t indent = 0;
+    while (indent < line.size() && (line[indent] == ' ' || line[indent] == '\t')) {
+        ++indent;
+    }
+    line.remove_prefix(indent);
+    if (line.rfind("#", 0) == 0) {
+        while (!line.empty() && line.front() == '#') {
+            line.remove_prefix(1);
+        }
+        while (!line.empty() && line.front() == ' ') {
+            line.remove_prefix(1);
+        }
+    }
+
+    std::string out;
+    if (!line.empty() && (line.front() == '*' || line.front() == '-' || line.front() == '+') &&
+        line.size() > 1 && line[1] == ' ') {
+        out = "- ";
+        line.remove_prefix(2);
+    }
+    for (std::size_t i = 0; i < line.size();) {
+        if (line.compare(i, 2, "**") == 0 || line.compare(i, 2, "__") == 0 ||
+            line.compare(i, 2, "~~") == 0) {
+            i += 2;
+            continue;
+        }
+        if (line[i] == '`' || line[i] == '*' || line[i] == '_') {
+            ++i;
+            continue;
+        }
+        // "[text](url)" keeps only the text.
+        if (line[i] == '[') {
+            const std::size_t close = line.find(']', i);
+            const std::size_t open = close == std::string_view::npos ? close : close + 1;
+            if (open != std::string_view::npos && open < line.size() && line[open] == '(') {
+                const std::size_t end = line.find(')', open);
+                if (end != std::string_view::npos) {
+                    out.append(line.substr(i + 1, close - i - 1));
+                    i = end + 1;
+                    continue;
+                }
+            }
+        }
+        out.push_back(line[i]);
+        ++i;
+    }
+    while (!out.empty() && out.back() == ' ') {
+        out.pop_back();
+    }
+    return out == "-" ? std::string{} : out;
+}
+
+std::vector<InfoPage> PaginateNotes(const std::string& notes, const std::string& heading,
+                                    int max_w) {
+    std::vector<std::string> lines;
+    bool last_blank = true; // Drops the leading and repeated blank lines Markdown leaves behind.
+    std::size_t pos = 0;
+    while (true) {
+        const std::size_t newline = notes.find('\n', pos);
+        const std::string flat =
+            FlattenMarkdown(std::string_view{notes}.substr(pos, newline - pos));
+        if (flat.empty()) {
+            if (!last_blank) {
+                lines.emplace_back();
+                last_blank = true;
+            }
+        } else {
+            for (std::string& line : WrapText(flat, max_w)) {
+                lines.push_back(std::move(line));
+            }
+            last_blank = false;
+        }
+        if (newline == std::string::npos) {
+            break;
+        }
+        pos = newline + 1;
+    }
+
+    std::vector<InfoPage> pages;
+    InfoPage current;
+    for (std::string& line : lines) {
+        if (current.lines.empty() && line.empty()) {
+            continue;
+        }
+        current.lines.push_back(std::move(line));
+        if (static_cast<int>(current.lines.size()) == kInfoLines) {
+            pages.push_back(std::move(current));
+            current = {};
+        }
+    }
+    while (!current.lines.empty() && current.lines.back().empty()) {
+        current.lines.pop_back();
+    }
+    if (!current.lines.empty()) {
+        pages.push_back(std::move(current));
+    }
+    if (!pages.empty()) {
+        pages.front().heading = heading;
+    }
+    return pages;
+}
+
+// Shown only to somebody who has already been running an earlier build.
+InfoPage MakeSupportPage(int max_w) {
+    return MakeInfoPage("Support Dekopon",
+                        {"Dekopon is free software written in my spare time.",
+                         "If you are enjoying it, and able to, you can support its development on Ko-fi:", "",
+                         std::string{kKofiUrl}, "", "Thank you."},
+                        max_w);
+}
+
+InfoCard BuildWelcomeCard() {
+    const int max_w = InfoCardTextW();
+    const SwitchPaths& paths = GetPaths();
+    InfoCard card;
+    card.title = "Welcome to Dekopon";
+    card.pages.push_back(MakeInfoPage(
+        "Your games",
+        {"Dekopon lists the games it finds in:", paths.roms_dir, "",
+         "- 3DS, CCI, CXI, 3DSX, APP and CIA files are all recognised.",
+         "- The Install tab installs CIAs to the emulated SD card.",
+         "- The Paths tab moves that folder, adds a second one, and can scan subfolders."},
+        max_w));
+    card.pages.push_back(MakeInfoPage(
+        "While a game runs",
+        {"- Press + and - together to open the quick menu. Here you can access save states,"
+         " cheats, amiibo, screen settings, and more.",
+         "- Click the right stick to cycle through the screen layouts.",
+         "- The touchscreen drives the bottom screen, and a stick or the gyro can drive it "
+         "instead."},
+        max_w));
+    card.pages.push_back(MakeInfoPage(
+        "Cheats, mods and textures",
+        {"These live under " + paths.user_dir + ", keyed by Title ID:", "",
+         "- cheats/<TITLE_ID>.txt", "- load/mods/<TITLE_ID>/", "- load/textures/<TITLE_ID>/", "",
+         "Texture packs also need Custom Textures switched on in the quick/settings menu."},
+        max_w));
+    card.pages.push_back(MakeInfoPage(
+        "Settings",
+        {"- Graphics chooses the renderer, the resolution and the shader options.",
+         "- Reset All Settings offers the Default, Performance and Ultra Performance presets."
+         "Performance is recommended for most titles.",
+         "- General holds the update channel, Check for Updates and the release notes.", "",
+         "Press A to start."},
+        max_w));
+    return card;
+}
+
+// What the menu does with the result of an update check. Only Silent runs without a modal.
+enum class UpdateCheckKind {
+    Silent,
+    Manual,
+    Notes,
+};
+
 class Menu {
 public:
     MenuResult Run(PadState& pad) {
@@ -1014,7 +1251,8 @@ public:
         Rescan();
         if (!g_auto_update_checked) {
             g_auto_update_checked = true;
-            BeginUpdateCheck(false);
+            ShowStartupCard();
+            BeginUpdateCheck(UpdateCheckKind::Silent);
         }
         while (appletMainLoop()) {
             padUpdate(&pad);
@@ -1062,14 +1300,16 @@ public:
 
             MenuResult result;
             bool done = false;
-            if (update_installed) {
+            if (info_card) {
+                HandleInfoCard(down, nav);
+            } else if (update_installed) {
                 if (down & (HidNpadButton_A | HidNpadButton_B | HidNpadButton_Plus |
                             HidNpadButton_Minus)) {
                     QueueUpdatedRelaunch();
                     Flush();
                     return {MenuAction::Exit, {}};
                 }
-            } else if (update_download_active || (update_check_active && update_check_manual)) {
+            } else if (update_download_active || UpdateModalOpen()) {
                 // The worker is pumped above and its modal is drawn below.
             } else if (install_active) {
                 PumpInstall();
@@ -1109,9 +1349,8 @@ public:
             }
 
             if (!install_active && !update_download_active && !update_installed &&
-                !(update_check_active && update_check_manual) && !details_open &&
-                !layout_picker_open && !remap_open && !preset_picker_open &&
-                !country_picker_open && !confirm) {
+                !UpdateModalOpen() && !info_card && !details_open && !layout_picker_open &&
+                !remap_open && !preset_picker_open && !country_picker_open && !confirm) {
                 HandleTouch();
             }
             if (pending_launch) {
@@ -1236,7 +1475,7 @@ private:
     // it still in flight. Without this the join below would wait out the GitHub request timeouts.
     std::atomic<bool> updater_cancel{false};
     bool update_check_active = false;
-    bool update_check_manual = false;
+    UpdateCheckKind update_check_kind = UpdateCheckKind::Silent;
     bool update_download_active = false;
     bool update_installed = false;
     std::atomic<std::uint64_t> update_downloaded{0};
@@ -1244,6 +1483,12 @@ private:
     UpdateCheckResult update_check_result{};
     UpdateInstallResult update_install_result{};
     UpdateRelease update_release{};
+
+    std::optional<InfoCard> info_card;
+    std::string update_from_version;
+    // Set when the What's New card went up without cached notes, so the startup check can fill
+    // them in behind it.
+    bool info_card_notes_pending = false;
 
     void Rescan() {
         games = ScanGames();
@@ -1607,7 +1852,10 @@ private:
             OpenShaderCacheConfirm();
             break;
         case SettingsModal::CheckForUpdates:
-            BeginUpdateCheck(true);
+            BeginUpdateCheck(UpdateCheckKind::Manual);
+            break;
+        case SettingsModal::ReleaseNotes:
+            OpenReleaseNotes();
             break;
         case SettingsModal::Username:
             if (const auto text = PromptSettingText("Username", "Name shown to other consoles",
@@ -1908,9 +2156,14 @@ private:
         }
     }
 
-    void BeginUpdateCheck(bool manual) {
+    // True while a check the user asked for is blocking the menu behind its modal.
+    bool UpdateModalOpen() const {
+        return update_check_active && update_check_kind != UpdateCheckKind::Silent;
+    }
+
+    void BeginUpdateCheck(UpdateCheckKind kind) {
         if (update_check_active || update_download_active) {
-            if (manual) {
+            if (kind != UpdateCheckKind::Silent) {
                 ShowNotice("An update operation is already running", false);
             }
             return;
@@ -1919,7 +2172,7 @@ private:
             updater_thread.join();
         }
         update_check_active = true;
-        update_check_manual = manual;
+        update_check_kind = kind;
         updater_done = false;
         updater_cancel = false;
         const UpdateChannel channel = GetUpdateChannel();
@@ -1940,8 +2193,25 @@ private:
 
         if (update_check_active) {
             update_check_active = false;
-            const bool manual = update_check_manual;
-            update_check_manual = false;
+            const UpdateCheckKind kind = update_check_kind;
+            update_check_kind = UpdateCheckKind::Silent;
+            const bool manual = kind == UpdateCheckKind::Manual;
+            if (!update_check_result.current_notes.empty()) {
+                CacheReleaseNotes(CurrentVersion(), update_check_result.current_notes);
+                FillPendingNotes(update_check_result.current_notes);
+            }
+            if (kind == UpdateCheckKind::Notes) {
+                if (!update_check_result.current_notes.empty()) {
+                    OpenReleaseNotesCard(update_check_result.current_notes);
+                } else if (update_check_result.status == UpdateCheckStatus::Error) {
+                    ShowNotice(update_check_result.error, true);
+                } else {
+                    ShowNotice("GitHub lists no notes for Dekopon " +
+                                   std::string{CurrentVersion()},
+                               true);
+                }
+                return;
+            }
             if (update_check_result.status == UpdateCheckStatus::Error) {
                 if (manual) {
                     OpenUpdateError(update_check_result.error);
@@ -1965,11 +2235,112 @@ private:
         if (update_download_active) {
             update_download_active = false;
             if (update_install_result.success) {
+                // Cached now so the What's New card works offline later.
+                CacheReleaseNotes(update_release.tag, update_release.notes);
                 DismissUpdateTag("");
                 update_installed = true;
             } else {
                 OpenUpdateError(update_install_result.error);
             }
+        }
+    }
+
+    // Puts up the welcome tour on a first run, or the notes for a build the user has just
+    // moved onto.
+    void ShowStartupCard() {
+        const std::string current = CurrentVersion();
+        const std::string previous = GetLastSeenVersion();
+        if (previous == current) {
+            return;
+        }
+        RecordSeenVersion(current);
+        const bool first_run = previous.empty() && GetLaunchCount() <= 1;
+        if (!first_run && !IsWhatsNewCardEnabled()) {
+            return;
+        }
+        if (first_run) {
+            info_card = BuildWelcomeCard();
+            return;
+        }
+        update_from_version = previous;
+        OpenWhatsNewCard();
+    }
+
+    std::string NotesHeading() const {
+        return update_from_version.empty() ? "Release notes"
+                                           : "Updated from " + update_from_version;
+    }
+
+    void OpenWhatsNewCard() {
+        const int max_w = InfoCardTextW();
+        InfoCard card;
+        card.title = "What's New in Dekopon " + std::string{CurrentVersion()};
+        const CachedReleaseNotes cached = LoadCachedReleaseNotes();
+        if (CompareReleaseVersions(cached.tag, CurrentVersion()) == 0) {
+            card.pages = PaginateNotes(cached.notes, NotesHeading(), max_w);
+        }
+        if (card.pages.empty()) {
+            card.pages.push_back(MakeInfoPage(
+                NotesHeading(),
+                {"Dekopon is now on " + std::string{CurrentVersion()} + ".", "",
+                 "The notes for this release appear here once fetched from GitHub, and "
+                 "are also under Settings > General to see later."},
+                max_w));
+            info_card_notes_pending = true;
+        }
+        card.pages.push_back(MakeSupportPage(max_w));
+        info_card = std::move(card);
+    }
+
+    // Swaps the placeholder page of an open What's New card for the notes the startup check
+    // brought back, leaving the support page where it is.
+    void FillPendingNotes(const std::string& notes) {
+        if (!info_card || !info_card_notes_pending) {
+            return;
+        }
+        info_card_notes_pending = false;
+        std::vector<InfoPage> pages = PaginateNotes(notes, NotesHeading(), InfoCardTextW());
+        if (pages.empty()) {
+            return;
+        }
+        pages.push_back(info_card->pages.back());
+        info_card->pages = std::move(pages);
+        info_card->page = 0;
+    }
+
+    void OpenReleaseNotesCard(const std::string& notes) {
+        InfoCard card;
+        card.title = "Dekopon " + std::string{CurrentVersion()};
+        card.pages = PaginateNotes(notes, "Release notes", InfoCardTextW());
+        if (card.pages.empty()) {
+            ShowNotice("This release has no notes", false);
+            return;
+        }
+        info_card = std::move(card);
+    }
+
+    void OpenReleaseNotes() {
+        const CachedReleaseNotes cached = LoadCachedReleaseNotes();
+        if (!cached.notes.empty() && CompareReleaseVersions(cached.tag, CurrentVersion()) == 0) {
+            OpenReleaseNotesCard(cached.notes);
+            return;
+        }
+        BeginUpdateCheck(UpdateCheckKind::Notes);
+    }
+
+    void HandleInfoCard(u64 down, u32 nav) {
+        const int last = static_cast<int>(info_card->pages.size()) - 1;
+        int page = info_card->page;
+        if ((nav & DirLeft) || (down & HidNpadButton_L)) {
+            --page;
+        }
+        if ((nav & DirRight) || (down & HidNpadButton_R)) {
+            ++page;
+        }
+        info_card->page = std::clamp(page, 0, last);
+        if (down & (HidNpadButton_A | HidNpadButton_B)) {
+            info_card.reset();
+            info_card_notes_pending = false;
         }
     }
 
@@ -2734,7 +3105,7 @@ private:
         if (install_active) {
             DrawInstallProgress(c);
         }
-        if (update_check_active && update_check_manual) {
+        if (UpdateModalOpen()) {
             DrawUpdateCheckProgress(c);
         }
         if (update_download_active) {
@@ -2742,6 +3113,9 @@ private:
         }
         if (update_installed) {
             DrawUpdateInstalled(c);
+        }
+        if (info_card) {
+            DrawInfoCard(c);
         }
     }
 
@@ -2897,7 +3271,11 @@ private:
         const int y = (g_screen_h - h) / 2;
         c.FillRect(0, 0, g_screen_w, g_screen_h, MakeColor(0x10, 0x11, 0x13, 0xC0));
         c.RoundBorder(x, y, w, h, 14, 2, kColBadge, kColSurface);
-        g_font.Draw(c, x + 24, y + 46, "Checking GitHub for updates...", 22, kColText);
+        g_font.Draw(c, x + 24, y + 46,
+                    update_check_kind == UpdateCheckKind::Notes
+                        ? "Fetching the release notes from GitHub..."
+                        : "Checking GitHub for updates...",
+                    22, kColText);
         g_font.Draw(c, x + 24, y + 80, "This normally takes only a few seconds.", 18,
                     kColTextDim);
     }
@@ -2948,6 +3326,48 @@ private:
         g_font.Draw(c, x + 24, y + 144, "Dekopon will close and reopen on the new version.", 17,
                     kColTextDim);
         DrawHint(c, x + 24, y + h - 42, "A", "Restart");
+    }
+
+    void DrawInfoCard(Canvas& c) {
+        const int w = InfoCardW();
+        const int h = InfoCardH();
+        const int x = (g_screen_w - w) / 2;
+        const int y = (g_screen_h - h) / 2;
+        c.FillRect(0, 0, g_screen_w, g_screen_h, MakeColor(0x10, 0x11, 0x13, 0xC0));
+        c.RoundBorder(x, y, w, h, 14, 2, kColBadge, kColSurface);
+
+        const InfoPage& page = info_card->pages[info_card->page];
+        g_font.Draw(c, x + 24, y + 46, g_font.Truncate(info_card->title, 24, w - 48), 24, kColText);
+        if (!page.heading.empty()) {
+            g_font.Draw(c, x + 24, y + 78, g_font.Truncate(page.heading, 19, w - 48), 19,
+                        kColAccent);
+        }
+        int line_y = y + kInfoBodyTop;
+        for (const std::string& line : page.lines) {
+            g_font.Draw(c, x + 24, line_y, line, kInfoBodySize,
+                        line == kKofiUrl ? kColAccent : kColTextDim);
+            line_y += kInfoLineH;
+        }
+
+        const int count = static_cast<int>(info_card->pages.size());
+        if (count > 1) {
+            constexpr int dot = 8;
+            constexpr int gap = 8;
+            int dx = x + (w - (count * dot + (count - 1) * gap)) / 2;
+            const int dy = y + h - 58;
+            for (int i = 0; i < count; ++i) {
+                c.FillRoundRect(dx, dy, dot, dot, dot / 2,
+                                i == info_card->page ? kColAccent : kColBadge);
+                dx += dot + gap;
+            }
+        }
+
+        int hx = x + 24;
+        const int hy = y + h - 38;
+        if (count > 1) {
+            hx += DrawHint(c, hx, hy, "L R", "Page") + 22;
+        }
+        DrawHint(c, hx, hy, "A", "Close");
     }
 
     void DrawLibrary(Canvas& c) {

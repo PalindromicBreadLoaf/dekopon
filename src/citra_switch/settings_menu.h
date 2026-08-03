@@ -37,6 +37,7 @@ enum class SettingsModal {
     ResetDefaults,
     ClearShaderCache,
     CheckForUpdates,
+    ReleaseNotes,
     Username,
     Country,
     FixedClock,

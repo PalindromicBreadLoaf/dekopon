@@ -70,6 +70,8 @@ int s_menu_rotation = 0;
 bool s_menu_input_rotated = false;
 SwitchFrontend::UpdateChannel s_update_channel = SwitchFrontend::UpdateChannel::Stable;
 std::string s_dismissed_update_tag;
+std::string s_last_seen_version;
+bool s_whats_new_card = true;
 
 // Pushes the picked image onto the three camera slots the CAM service reads.
 void ApplyCameraSettings() {
@@ -234,6 +236,7 @@ public:
         const std::string artic_address = s_artic_base_address;
         const std::string camera_image = s_camera_image;
         const SwitchFrontend::CameraTarget camera_target = s_camera_target;
+        const std::string seen_version = s_last_seen_version;
         const int launches = launch_count;
 
         auto loaded = std::move(config);
@@ -247,6 +250,7 @@ public:
         s_camera_image = camera_image;
         s_camera_target = camera_target;
         ApplyCameraSettings();
+        s_last_seen_version = seen_version;
         launch_count = launches;
     }
 
@@ -371,6 +375,9 @@ private:
             config->GetInteger("Switch", "update_channel", 0), 0, 1));
         s_dismissed_update_tag =
             Common::StripSpaces(config->Get("Switch", "dismissed_update", ""));
+        s_last_seen_version =
+            Common::StripSpaces(config->Get("Switch", "last_seen_version", ""));
+        s_whats_new_card = config->GetBoolean("Switch", "show_whats_new", true);
 
         SwitchFrontend::SetMovieThrottleEnabled(
             config->GetBoolean("Experimental", "movie_cpu_throttle", false));
@@ -430,6 +437,8 @@ private:
            << '\n';
         ss << "update_channel = " << static_cast<int>(s_update_channel) << '\n';
         ss << "dismissed_update = " << s_dismissed_update_tag << '\n';
+        ss << "last_seen_version = " << s_last_seen_version << '\n';
+        ss << "show_whats_new = " << (s_whats_new_card ? "true" : "false") << '\n';
         ss << "launch_count = " << launch_count << "\n\n";
 
         ss << "[Camera]\n";
@@ -527,6 +536,10 @@ int Bootstrap() {
     return s_config->LaunchCount();
 }
 
+int GetLaunchCount() {
+    return s_config ? s_config->LaunchCount() : 0;
+}
+
 const SwitchPaths& GetPaths() {
     return s_paths;
 }
@@ -606,6 +619,26 @@ const std::string& GetDismissedUpdateTag() {
 void DismissUpdateTag(const std::string& tag) {
     s_dismissed_update_tag = tag;
     SaveConfig();
+}
+
+const std::string& GetLastSeenVersion() {
+    return s_last_seen_version;
+}
+
+void RecordSeenVersion(const std::string& version) {
+    if (s_last_seen_version == version) {
+        return;
+    }
+    s_last_seen_version = version;
+    SaveConfig();
+}
+
+bool IsWhatsNewCardEnabled() {
+    return s_whats_new_card;
+}
+
+void SetWhatsNewCardEnabled(bool enabled) {
+    s_whats_new_card = enabled;
 }
 
 MenuDirections RotateMenuDirections(MenuDirections pressed) {

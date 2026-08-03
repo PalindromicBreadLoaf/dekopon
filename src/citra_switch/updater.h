@@ -21,6 +21,7 @@ struct UpdateRelease {
     std::string tag;
     std::string name;
     std::string download_url;
+    std::string notes; // The release body in Markdown.
     std::string sha256;
     std::uint64_t size{};
     bool prerelease{};
@@ -35,6 +36,8 @@ enum class UpdateCheckStatus {
 struct UpdateCheckResult {
     UpdateCheckStatus status{UpdateCheckStatus::Error};
     UpdateRelease release;
+    // Notes of the release matching the running build, when GitHub still lists it.
+    std::string current_notes;
     std::string error;
 };
 
@@ -66,5 +69,15 @@ UpdateCheckResult CheckForUpdate(UpdateChannel channel,
 UpdateInstallResult InstallUpdate(const UpdateRelease& release,
                                   const std::string& executable_path,
                                   UpdateProgressCallback progress);
+
+struct CachedReleaseNotes {
+    std::string tag;
+    std::string notes;
+};
+
+// Notes are kept beside config.ini so the What's New card and the settings viewer work without
+// a network connection.
+CachedReleaseNotes LoadCachedReleaseNotes();
+void CacheReleaseNotes(const std::string& tag, const std::string& notes);
 
 } // namespace SwitchFrontend
