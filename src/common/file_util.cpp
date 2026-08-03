@@ -431,6 +431,12 @@ bool Rename(const std::string& srcFullPath, const std::string& destFullPath) {
             return true;
         }
     }
+#elif defined(__SWITCH__)
+    if (Exists(srcFullPath)) {
+        ::remove(destFullPath.c_str());
+    }
+    if (rename(srcFullPath.c_str(), destFullPath.c_str()) == 0)
+        return true;
 #else
     if (rename(srcFullPath.c_str(), destFullPath.c_str()) == 0)
         return true;
