@@ -29,7 +29,7 @@ constexpr std::size_t IgnoreFrames = 5;
 
 namespace Core {
 
-bool PerfStats::game_frames_updated = true;
+std::atomic<bool> PerfStats::game_frames_updated = true;
 
 PerfStats::PerfStats(u64 title_id) : title_id(title_id) {}
 

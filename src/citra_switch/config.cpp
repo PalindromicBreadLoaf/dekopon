@@ -104,6 +104,7 @@ void VisitPersistedSettings(Visitor&& visit) {
     visit("Renderer", v.frame_limit);
     visit("Renderer", v.use_vsync);
     visit("Renderer", v.use_display_refresh_rate_detection);
+    visit("Renderer", v.use_skip_duplicate_frames);
     visit("Renderer", v.async_gpu_emulation);
     visit("Renderer", v.strict_gpu_sync);
     visit("Renderer", v.async_presentation);
@@ -310,11 +311,6 @@ private:
         // This is just a performance loss if the game doesn't use these cores.
         Settings::values.is_new_3ds =
             config->GetBoolean("Core", Settings::values.is_new_3ds.GetLabel(), false);
-
-        // Upstream defaults this on, but nothing ever calls PerfStats::EndGameFrame(), so the
-        // game_frames_updated flag it gates on is cleared after the first present and never set
-        // again?
-        Settings::values.use_skip_duplicate_frames = false;
 
         SwitchFrontend::SetFullscreenStretchEnabled(config->GetBoolean(
             "Switch", "stretch_fullscreen",

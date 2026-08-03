@@ -538,6 +538,7 @@ std::vector<SettingsRow> BuildSettingsPage(SettingsPage page) {
             Toggle("Async Presentation", v.async_presentation),
             Toggle("VSync", v.use_vsync),
             Toggle("Detect Display Refresh Rate", v.use_display_refresh_rate_detection),
+            Toggle("Skip Duplicate Frames", v.use_skip_duplicate_frames),
             Toggle("SPIR-V Shader Generation", v.spirv_shader_gen),
             Toggle("Disable SPIR-V Optimizer", v.disable_spirv_optimizer),
             Choice("Texture Sampling", v.texture_sampling, kTextureSamplingNames),

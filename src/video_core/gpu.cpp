@@ -19,6 +19,7 @@
 #include "core/hle/service/plgldr/plgldr.h"
 #include "core/loader/loader.h"
 #include "core/memory.h"
+#include "core/perf_stats.h"
 #include "video_core/debug_utils/debug_utils.h"
 #include "video_core/gpu.h"
 #include "video_core/gpu_debugger.h"
@@ -447,6 +448,9 @@ void GPU::SetBufferSwap(u32 screen_id, const Service::GSP::FrameBufferInfo& info
     if (screen_id == 0) {
         MicroProfileFlip();
         impl->system.perf_stats->EndGameFrame();
+    } else {
+        // A bottom-screen-only swap is still something new to present, but it is not a game frame.
+        Core::PerfStats::game_frames_updated = true;
     }
 
     BufferSwapCommand command{screen_id,   phys_address_left, phys_address_right, info.active_fb,
