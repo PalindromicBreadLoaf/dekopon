@@ -13,6 +13,7 @@
 #include "citra_switch/input.h"
 #include "citra_switch/menu.h"
 #include "citra_switch/overlay_menu.h"
+#include "citra_switch/usb_storage.h"
 #include "common/horizon_thread.h"
 
 extern "C" {
@@ -260,6 +261,10 @@ int main(int argc, char* argv[]) {
         std::printf("Warning: failed to pin frontend thread to core 0.\n");
     }
 
+    if (!SwitchFrontend::InitUsbStorage()) {
+        std::printf("Warning: %s\n", SwitchFrontend::UsbStorageError().c_str());
+    }
+
     // Resolve SD-card dirs and create folders/files if not present
     const int launch_count = SwitchFrontend::Bootstrap();
     std::printf("FS & logging up (launch #%d). Logs are located at sdmc:/switch/dekopon/log/\n",
@@ -297,6 +302,7 @@ int main(int argc, char* argv[]) {
     SwitchFrontend::ShutdownInput();
     StopSixAxis();
     SwitchFrontend::Shutdown();
+    SwitchFrontend::ShutdownUsbStorage();
     if (have_romfs) {
         romfsExit();
     }

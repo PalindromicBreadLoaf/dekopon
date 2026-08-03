@@ -12,9 +12,10 @@ namespace SwitchFrontend {
 
 // Directories the frontend owns. Absolute SD paths including a trailing '/'.
 struct SwitchPaths {
-    std::string user_dir;  // Holds config/, nand/, sdmc/, log/, ...
-    std::string roms_dir;  // Scanned for titles.
-    bool scan_recursive{}; // Whether the scan descends into roms_dir's subfolders.
+    std::string user_dir;   // Holds config/, nand/, sdmc/, log/, ...
+    std::string roms_dir;   // Scanned for titles.
+    std::string roms_dir_2; // Another location for titles.
+    bool scan_recursive{};  // Whether the scan descends into the ROM folders' subfolders.
 };
 
 struct SystemFileSetupState {
@@ -33,7 +34,7 @@ int Bootstrap();
 // The configured paths.
 const SwitchPaths& GetPaths();
 
-// Persists `paths`. roms_dir and scan_recursive apply to the next scan.
+// Persists `paths`. The ROM folders and scan_recursive apply to the next scan.
 void SetPaths(const SwitchPaths& paths);
 
 // Cartridge image exposed to software launched from the emulated HOME Menu.

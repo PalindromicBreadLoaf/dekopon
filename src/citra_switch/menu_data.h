@@ -128,6 +128,9 @@ InstallResult InstallCia(const std::string& path,
 // A short reason for a failed installation.
 const char* InstallResultText(InstallResult result);
 
+// The mounted filesystem devices ("sdmc:/", USB storage, ...), sorted by name.
+std::vector<DirEntry> ListDevices();
+
 // The subfolders of `directory`, sorted by name.
 std::vector<DirEntry> ListSubdirectories(const std::string& directory);
 
@@ -136,5 +139,8 @@ std::string ParentDirectory(const std::string& directory);
 
 // True if `directory` exists or could be created.
 bool EnsureDirectory(const std::string& directory);
+
+// True if `directory` is currently present.
+bool DirectoryExists(const std::string& directory);
 
 } // namespace SwitchFrontend

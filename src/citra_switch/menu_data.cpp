@@ -9,6 +9,8 @@
 #include <memory>
 #include <optional>
 
+#include <sys/iosupport.h>
+
 #include <fmt/format.h>
 
 #include "citra_switch/config.h"
@@ -513,12 +515,37 @@ std::vector<GameEntry> ScanGames() {
 
     std::vector<GameEntry> games;
     ScanDirectory(paths.roms_dir, games, 0, paths.scan_recursive);
+    // Only scan second dir when present.
+    if (!paths.roms_dir_2.empty() && paths.roms_dir_2 != paths.roms_dir &&
+        FileUtil::IsDirectory(paths.roms_dir_2)) {
+        ScanDirectory(paths.roms_dir_2, games, 0, paths.scan_recursive);
+    }
     ScanInstalled(games);
 
     std::sort(games.begin(), games.end(), [](const GameEntry& a, const GameEntry& b) {
         return Common::ToLower(a.title) < Common::ToLower(b.title);
     });
     return games;
+}
+
+std::vector<DirEntry> ListDevices() {
+    std::vector<DirEntry> out;
+    for (int i = 0; i < STD_MAX; ++i) {
+        const devoptab_t* device = devoptab_list[i];
+        if (device == nullptr || device->name == nullptr) {
+            continue;
+        }
+        // The table also holds the console and the std streams, which have no browsable root.
+        const std::string root = std::string{device->name} + ":/";
+        if (!FileUtil::IsDirectory(root)) {
+            continue;
+        }
+        out.push_back(DirEntry{std::string{device->name} + ':', root});
+    }
+    std::sort(out.begin(), out.end(), [](const DirEntry& a, const DirEntry& b) {
+        return Common::ToLower(a.name) < Common::ToLower(b.name);
+    });
+    return out;
 }
 
 std::vector<DirEntry> ListSubdirectories(const std::string& directory) {
@@ -552,6 +579,10 @@ std::string ParentDirectory(const std::string& directory) {
 
 bool EnsureDirectory(const std::string& directory) {
     return FileUtil::CreateFullPath(directory) && FileUtil::IsDirectory(directory);
+}
+
+bool DirectoryExists(const std::string& directory) {
+    return !directory.empty() && FileUtil::IsDirectory(directory);
 }
 
 } // namespace SwitchFrontend

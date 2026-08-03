@@ -541,6 +541,11 @@ if (ENABLE_VULKAN)
     endif()
 endif()
 
+# libusbhsfs for USB mass storage.
+if (DEKOPON)
+    add_subdirectory(libusbhsfs EXCLUDE_FROM_ALL)
+endif()
+
 # NXVK  is consumed as a set of prebuilt static archives rather than an add_subdirectory.
 if (DEKOPON AND ENABLE_VULKAN)
     set(NXVK_ROOT "${CMAKE_SOURCE_DIR}/externals/nxvk" CACHE PATH

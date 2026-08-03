@@ -29,6 +29,7 @@
 #include "citra_switch/menu_data.h"
 #include "citra_switch/rail_icons.h"
 #include "citra_switch/settings_menu.h"
+#include "citra_switch/usb_storage.h"
 #include "common/horizon_boost.h"
 
 namespace SwitchFrontend {
@@ -589,7 +590,7 @@ std::string PromptLogFilter(const std::string& initial) {
 }
 
 // Rows on the Paths page.
-enum PathRow { PathRowUserDir, PathRowRomsDir, PathRowRecursive, PathRowCount };
+enum PathRow { PathRowUserDir, PathRowRomsDir, PathRowRomsDir2, PathRowRecursive, PathRowCount };
 
 constexpr int kPathRowH = 76;
 constexpr int kPathToggleH = 52;
@@ -613,6 +614,8 @@ const char* PathRowLabel(int row) {
         return "Dekopon Folder";
     case PathRowRomsDir:
         return "ROM Folder";
+    case PathRowRomsDir2:
+        return "Second ROM Folder";
     default:
         return "Scan Subfolders";
     }
@@ -1004,6 +1007,10 @@ public:
             const u64 down = padGetButtonsDown(&pad);
             held = padGetButtons(&pad);
 
+            if (!install_active && ConsumeUsbStorageChange()) {
+                HandleUsbStorageChange();
+            }
+
             // +/- together exits the app, but will not allow during an install.
             if (!install_active && (held & (HidNpadButton_Plus | HidNpadButton_Minus)) ==
                                        (HidNpadButton_Plus | HidNpadButton_Minus)) {
@@ -1136,6 +1143,8 @@ private:
     bool fb_ready = false;
     bool settings_dirty = false; // Edited settings not yet written to config.ini.
     bool paths_dirty = false;
+    // Whether the second ROM folder's device is attached. Sampled rather than stat'd per frame.
+    bool roms_dir_2_present = false;
 
     // Library detail panel.
     bool details_open = false;
@@ -1184,10 +1193,34 @@ private:
     void Rescan() {
         games = ScanGames();
         paths = GetPaths();
-        if (install_dir.empty()) {
+        RefreshRomsDir2Presence();
+        // Only seeds the Install page's starting folder: once it has been browsed, an empty
+        // install_dir means the device list and must be left alone.
+        if (!install_listed && install_dir.empty()) {
             install_dir = paths.roms_dir;
         }
         ApplyFilter();
+    }
+
+    // A drive appearing or leaving changes what the second ROM folder holds, and the library has
+    // to follow it. Path edits in progress are left alone, since Rescan() would drop them.
+    void HandleUsbStorageChange() {
+        const bool was_present = roms_dir_2_present;
+        RefreshRomsDir2Presence();
+
+        const std::vector<UsbVolume> volumes = GetUsbVolumes();
+        if (volumes.empty()) {
+            ShowNotice("USB storage disconnected", false);
+        } else if (volumes.size() == 1) {
+            ShowNotice(volumes.front().label + " mounted as " + volumes.front().root, false);
+        } else {
+            ShowNotice(std::to_string(volumes.size()) + " USB volumes mounted", false);
+        }
+
+        if (roms_dir_2_present != was_present && !paths.roms_dir_2.empty() && !paths_dirty) {
+            ShowBusy("Refreshing library...");
+            Rescan();
+        }
     }
 
     // Switch tabs persisting any pending edits when leaving an editing page so a disk write
@@ -1207,6 +1240,9 @@ private:
             }
         }
         tab = next;
+        if (tab == Tab::Paths) {
+            RefreshRomsDir2Presence();
+        }
         if (tab == Tab::Install && !install_listed) {
             ShowBusy("Reading CIAs...");
             RefreshInstallList();
@@ -1240,7 +1276,8 @@ private:
     // True while the edited scan inputs differ from what the last scan used.
     bool ScanInputsChanged() const {
         const SwitchPaths& live = GetPaths();
-        return paths.roms_dir != live.roms_dir || paths.scan_recursive != live.scan_recursive;
+        return paths.roms_dir != live.roms_dir || paths.roms_dir_2 != live.roms_dir_2 ||
+               paths.scan_recursive != live.scan_recursive;
     }
 
     // The dekopon directory only moves on the next launch.
@@ -1323,9 +1360,9 @@ private:
         return false;
     }
 
-    // Row model for the Install page: ".." (unless at a device root), then subfolders, then CIAs.
+    // Row model for the Install page: ".." (unless listing devices), then subfolders, then CIAs.
     int InstallParentRows() const {
-        return ParentDirectory(install_dir).empty() ? 0 : 1;
+        return install_dir.empty() ? 0 : 1;
     }
 
     int InstallRowCount() const {
@@ -1343,8 +1380,9 @@ private:
     }
 
     void RefreshInstallList() {
-        install_dirs = ListSubdirectories(install_dir);
-        install_cias = ListCiaFiles(install_dir);
+        // Stepping up out of a device root lands on the device list, which holds no files.
+        install_dirs = install_dir.empty() ? ListDevices() : ListSubdirectories(install_dir);
+        install_cias = install_dir.empty() ? std::vector<CiaEntry>{} : ListCiaFiles(install_dir);
         install_sel = std::clamp(install_sel, 0, std::max(0, InstallRowCount() - 1));
         install_listed = true;
     }
@@ -1825,18 +1863,32 @@ private:
         return false;
     }
 
+    std::string& PathRowValue(int row) {
+        switch (row) {
+        case PathRowUserDir:
+            return paths.user_dir;
+        case PathRowRomsDir2:
+            return paths.roms_dir_2;
+        default:
+            return paths.roms_dir;
+        }
+    }
+
     void PickFolder(int row) {
-        const std::string& current = row == PathRowUserDir ? paths.user_dir : paths.roms_dir;
-        const std::optional<std::string> picked = BrowseForFolder(current);
+        std::string& current = PathRowValue(row);
+        // An unset second folder starts the browse next to the first one.
+        const std::optional<std::string> picked =
+            BrowseForFolder(current.empty() ? paths.roms_dir : current);
         if (!picked) {
             return;
         }
-        if (row == PathRowUserDir) {
-            paths.user_dir = *picked;
-        } else {
-            paths.roms_dir = *picked;
-        }
+        current = *picked;
         paths_dirty = true;
+        RefreshRomsDir2Presence();
+    }
+
+    void RefreshRomsDir2Presence() {
+        roms_dir_2_present = DirectoryExists(paths.roms_dir_2);
     }
 
     void ResetToDefault(int row) {
@@ -1846,6 +1898,9 @@ private:
             break;
         case PathRowRomsDir:
             paths.roms_dir = GetDefaultRomsDir(paths.user_dir);
+            break;
+        case PathRowRomsDir2:
+            paths.roms_dir_2.clear();
             break;
         default:
             paths.scan_recursive = true;
@@ -1992,6 +2047,8 @@ private:
     }
 
     // Modal folder picker. Blocks until a folder is chosen or the user backs out.
+    // An empty `dir` lists the mounted devices, which is the only way onto storage other
+    // than the SD card.
     std::optional<std::string> BrowseForFolder(const std::string& start) {
         std::string dir = EnsureDirectory(start) ? start : std::string{"sdmc:/"};
         std::vector<DirEntry> entries = ListSubdirectories(dir);
@@ -2001,8 +2058,8 @@ private:
 
         auto Enter = [&](const std::string& next, const std::string& highlight) {
             dir = next;
-            entries = ListSubdirectories(dir);
-            const int base = ParentDirectory(dir).empty() ? 0 : 1;
+            entries = dir.empty() ? ListDevices() : ListSubdirectories(dir);
+            const int base = dir.empty() ? 0 : 1;
             sel = 0;
             scroll = 0;
             for (int i = 0; i < static_cast<int>(entries.size()); ++i) {
@@ -2021,9 +2078,9 @@ private:
             const u32 nav = rep.Step((down & HidNpadButton_Up) || ls.y > dz,
                                      (down & HidNpadButton_Down) || ls.y < -dz, false, false);
 
-            const std::string parent = ParentDirectory(dir);
-            // Row 0 is ".." everywhere but device root.
-            const int base = parent.empty() ? 0 : 1;
+            const std::string parent = dir.empty() ? "" : ParentDirectory(dir);
+            // Row 0 is ".." everywhere but the device list, which a device root steps up into.
+            const int base = dir.empty() ? 0 : 1;
             const int count = static_cast<int>(entries.size()) + base;
             sel = std::clamp(sel, 0, std::max(0, count - 1));
 
@@ -2043,7 +2100,7 @@ private:
                 }
             }
             if (down & HidNpadButton_B) {
-                if (parent.empty()) {
+                if (dir.empty()) {
                     return std::nullopt;
                 }
                 Enter(parent, dir);
@@ -2051,7 +2108,7 @@ private:
             if (down & HidNpadButton_Y) {
                 return std::nullopt;
             }
-            if (down & HidNpadButton_Plus) {
+            if ((down & HidNpadButton_Plus) && !dir.empty()) {
                 return dir;
             }
 
@@ -2066,11 +2123,15 @@ private:
         Canvas& c = canvas;
         c.Clear(kColBg);
 
-        g_font.Draw(c, 40, 44, "Select folder", 28, kColText);
-        g_font.Draw(c, 40, 76, g_font.TruncateFront(dir, 20, g_screen_w - 80), 20, kColAccent);
+        const bool devices = dir.empty();
+        g_font.Draw(c, 40, 44, devices ? "Select device" : "Select folder", 28, kColText);
+        g_font.Draw(c, 40, 76,
+                    devices ? std::string{"Mounted devices"}
+                            : g_font.TruncateFront(dir, 20, g_screen_w - 80),
+                    20, kColAccent);
         c.FillRect(40, 96, g_screen_w - 80, 1, kColRail);
 
-        const bool has_parent = !ParentDirectory(dir).empty();
+        const bool has_parent = !devices;
         const int base = has_parent ? 1 : 0;
         const int count = static_cast<int>(entries.size()) + base;
 
@@ -2097,7 +2158,9 @@ private:
         const int hy = ContentBottom() + (kHintH - 26) / 2;
         hx += DrawHint(c, hx, hy, "A", "Open") + 22;
         hx += DrawHint(c, hx, hy, "B", has_parent ? "Up" : "Cancel") + 22;
-        hx += DrawHint(c, hx, hy, "+", "Select this folder") + 22;
+        if (!devices) {
+            hx += DrawHint(c, hx, hy, "+", "Select this folder") + 22;
+        }
         DrawHint(c, hx, hy, "Y", "Cancel");
     }
 
@@ -2123,14 +2186,21 @@ private:
                 continue;
             }
             g_font.Draw(c, x + 20, y + 30, PathRowLabel(i), 22, kColText);
-            const std::string& dir = i == PathRowUserDir ? paths.user_dir : paths.roms_dir;
-            g_font.Draw(c, x + 20, y + 58, g_font.TruncateFront(dir, 18, w - 44), 18,
+            const std::string& dir = PathRowValue(i);
+            const std::string value =
+                dir.empty() ? std::string{"Not set"} : g_font.TruncateFront(dir, 18, w - 44);
+            g_font.Draw(c, x + 20, y + 58, value, 18,
                         on && content_focus ? kColAccent : kColTextDim);
         }
 
         int y = PathRowTop(PathRowCount - 1) + PathRowHeight(PathRowCount - 1) + 30;
         if (RestartPending()) {
             g_font.Draw(c, x + 20, y, "Restart Dekopon to move to the new folder.", 18, kColAccent);
+            y += 26;
+        }
+        if (!paths.roms_dir_2.empty() && !roms_dir_2_present) {
+            g_font.Draw(c, x + 20, y, "The second ROM folder is not reachable right now.", 18,
+                        kColTextDim);
             y += 26;
         }
 
@@ -2141,7 +2211,7 @@ private:
             const int hy = ContentBottom() + (kHintH - 26) / 2;
             hx +=
                 DrawHint(c, hx, hy, "A", paths_sel == PathRowRecursive ? "Toggle" : "Browse") + 22;
-            hx += DrawHint(c, hx, hy, "Y", "Default") + 22;
+            hx += DrawHint(c, hx, hy, "Y", paths_sel == PathRowRomsDir2 ? "Clear" : "Default") + 22;
             hx += DrawHint(c, hx, hy, "B", "Menu") + 22;
             DrawHint(c, hx, hy, "+ -", "Exit");
         }
@@ -2306,8 +2376,10 @@ private:
         const bool content_focus = focus == Focus::Content;
         const int x = kContentX + 24;
         const int w = ContentW() - 48;
-        g_font.Draw(c, x, kContentTop + 26, g_font.TruncateFront(install_dir, 18, w), 18,
-                    kColAccent);
+        g_font.Draw(c, x, kContentTop + 26,
+                    install_dir.empty() ? std::string{"Mounted devices"}
+                                        : g_font.TruncateFront(install_dir, 18, w),
+                    18, kColAccent);
         c.FillRect(x, kContentTop + kInstallHeaderH, w, 1, kColRail);
 
         const int count = InstallRowCount();

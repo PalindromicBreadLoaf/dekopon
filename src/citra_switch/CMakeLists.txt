@@ -37,10 +37,12 @@ add_executable(citra_switch
     rail_icons.h
     settings_menu.cpp
     settings_menu.h
+    usb_storage.cpp
+    usb_storage.h
 )
 
 # oaknut_horizon_jit is pulled in transitively via oaknut
-target_link_libraries(citra_switch PRIVATE citra_core citra_common inih)
+target_link_libraries(citra_switch PRIVATE citra_core citra_common inih usbhsfs)
 
 # The launcher draws with a libnx software framebuffer and renders text with FreeType
 find_path(SWITCH_FREETYPE_INCLUDE_DIR ft2build.h PATH_SUFFIXES freetype2 REQUIRED)

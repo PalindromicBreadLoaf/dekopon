@@ -87,8 +87,7 @@ void ApplyCameraSettings() {
     }
 }
 
-// Every Settings::values entry config.ini round-trips, in file order. Reading and writing share
-// this list so the two cannot drift apart.
+// Every Settings::values entry config.ini round-trips, in file order.
 template <typename Visitor>
 void VisitPersistedSettings(Visitor&& visit) {
     auto& v = Settings::values;
@@ -331,6 +330,8 @@ private:
         if (s_paths.roms_dir.empty()) {
             s_paths.roms_dir = SwitchFrontend::GetDefaultRomsDir(s_paths.user_dir);
         }
+        s_paths.roms_dir_2 =
+            WithTrailingSlash(Common::StripSpaces(config->Get("Switch", "roms_dir_2", "")));
         s_paths.scan_recursive = config->GetBoolean("Switch", "scan_recursive", true);
         s_inserted_cartridge =
             Common::StripSpaces(config->Get("Switch", "inserted_cartridge", ""));
@@ -407,6 +408,7 @@ private:
 
         ss << "\n[Switch]\n";
         ss << "roms_dir = " << s_paths.roms_dir << '\n';
+        ss << "roms_dir_2 = " << s_paths.roms_dir_2 << '\n';
         ss << "scan_recursive = " << (s_paths.scan_recursive ? "true" : "false") << '\n';
         ss << "inserted_cartridge = " << s_inserted_cartridge << '\n';
         ss << "last_artic_base_addr = " << s_artic_base_address << '\n';
@@ -510,6 +512,9 @@ int Bootstrap() {
     LOG_INFO(Frontend, "User directory: {}", s_active_user_dir);
     LOG_INFO(Frontend, "ROM directory: {} (recursive: {})", s_paths.roms_dir,
              s_paths.scan_recursive);
+    if (!s_paths.roms_dir_2.empty()) {
+        LOG_INFO(Frontend, "Second ROM directory: {}", s_paths.roms_dir_2);
+    }
     LOG_INFO(Frontend, "Logging to: {}", FileUtil::GetUserPath(FileUtil::UserPath::LogDir));
 
     return s_config->LaunchCount();
@@ -521,6 +526,7 @@ const SwitchPaths& GetPaths() {
 
 void SetPaths(const SwitchPaths& paths) {
     s_paths.roms_dir = WithTrailingSlash(paths.roms_dir);
+    s_paths.roms_dir_2 = WithTrailingSlash(Common::StripSpaces(paths.roms_dir_2));
     s_paths.scan_recursive = paths.scan_recursive;
 
     const std::string user_dir = WithTrailingSlash(paths.user_dir);
