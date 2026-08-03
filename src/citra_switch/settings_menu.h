@@ -14,6 +14,7 @@ namespace SwitchFrontend {
 enum class SettingsPage {
     General,
     System,
+    Console,
     Graphics,
     Enhancements,
     Audio,
@@ -35,6 +36,18 @@ enum class SettingsModal {
     LogFilter,
     ResetDefaults,
     ClearShaderCache,
+    Username,
+    Country,
+    FixedClock,
+    InitTicksValue,
+    ConsoleId,
+    MacAddress,
+    UnlinkConsole,
+    // Ordered to match UniqueDataFile
+    InstallSecureInfo,
+    InstallFriendCodeSeed,
+    InstallOtp,
+    InstallMovable,
 };
 
 struct SettingsRow {
@@ -76,8 +89,64 @@ const char* ActiveGraphicsBackendName();
 std::string GetLogFilter();
 void SetLogFilter(const std::string& filter);
 
-// Writes pending edits to config.ini, plus the 3DS system language to the CFG NAND savegame when
-// it changed.
+// The 3DS profile name
+std::string GetProfileUsername();
+void SetProfileUsername(const std::string& name);
+
+// One selectable entry in the country picker. `code` is the raw 3DS country code.
+struct CountryOption {
+    int code;
+    const char* name;
+};
+
+// Every country the 3DS defines, in code order.
+const std::vector<CountryOption>& CountryOptions();
+int GetProfileCountry();
+void SetProfileCountry(int code);
+
+// False when the country does not belong to the configured console region.
+bool IsCountryValidForRegion(int code);
+
+// The fixed start-up clock, as "YYYY-MM-DD HH:MM:SS".
+std::string GetFixedClockText();
+bool SetFixedClockText(const std::string& text);
+
+// The fixed initial CPU tick count, as a decimal string.
+std::string GetInitTicksText();
+void SetInitTicksText(const std::string& text);
+
+std::string GetConsoleIdText();
+std::string GetMacAddressText();
+void RegenerateConsoleId();
+void RegenerateMacAddress();
+
+// The files dumped from a real console that Azahar needs to act as that console.
+enum class UniqueDataFile {
+    SecureInfo,
+    FriendCodeSeed,
+    Otp,
+    Movable,
+    Count,
+};
+
+const char* UniqueDataFileName(UniqueDataFile file);
+
+// A short load status.
+std::string UniqueDataStatus(UniqueDataFile file);
+
+// Copies `from` over the console's stored copy of `file`.
+bool InstallUniqueDataFile(UniqueDataFile file, const std::string& from);
+
+// True once every file needed to impersonate a real console is present, which is what makes
+// unlinking meaningful and blocks replacing the files piecemeal.
+bool IsConsoleLinked();
+void UnlinkConsole();
+
+// Drops the cached read of the CFG savegame so the next visit sees what the last game wrote.
+void RefreshSystemSettings();
+
+// Writes pending edits to config.ini, plus the profile data that lives in the CFG NAND savegame
+// and the play coin count that lives in the PTM save.
 void CommitSettings();
 
 } // namespace SwitchFrontend

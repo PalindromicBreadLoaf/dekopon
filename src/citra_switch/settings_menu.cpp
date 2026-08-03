@@ -6,7 +6,11 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <ctime>
+#include <memory>
 #include <optional>
+#include <stdexcept>
+#include <string>
 #include <type_traits>
 
 #include "audio_core/dsp_interface.h"
@@ -15,12 +19,16 @@
 #include "citra_switch/menu_data.h"
 #include "citra_switch/overlay_menu.h"
 #include "citra_switch/settings_menu.h"
+#include "common/file_util.h"
 #include "common/logging/backend.h"
 #include "common/logging/filter.h"
 #include "common/settings.h"
+#include "common/string_util.h"
 #include "core/core.h"
 #include "core/core_timing.h"
 #include "core/hle/service/cfg/cfg.h"
+#include "core/hle/service/ptm/ptm.h"
+#include "core/hw/unique_data.h"
 
 namespace SwitchFrontend {
 
@@ -28,19 +36,6 @@ namespace {
 
 std::string BoolText(bool on) {
     return on ? "On" : "Off";
-}
-
-// The system language is kept in the CFG NAND savegame rather than config.ini, so it is read once
-// and written back only when the user leaves the Settings tab.
-std::optional<int> s_language;
-bool s_language_dirty = false;
-
-int ReadLanguage() {
-    if (!s_language) {
-        s_language = static_cast<int>(
-            Service::CFG::GetModule(Core::System::GetInstance())->GetSystemLanguage());
-    }
-    return *s_language;
 }
 
 // Ordered to match Service::CFG::SystemLanguage.
@@ -51,6 +46,259 @@ constexpr std::array<const char*, 12> kLanguageNames{
 // Ordered to match the SMDH region list, offset by one so index 0 is the auto-select sentinel.
 constexpr std::array<const char*, 8> kRegionNames{"Auto",      "Japan", "USA",   "Europe",
                                                   "Australia", "China", "Korea", "Taiwan"};
+
+// Ordered to match Service::CFG::SoundOutputMode.
+constexpr std::array<const char*, 3> kSoundOutputNames{"Mono", "Stereo", "Surround"};
+
+// Ordered to match Settings::InitTicks.
+constexpr std::array<const char*, 2> kInitTicksNames{"Random", "Fixed"};
+
+constexpr std::array<const char*, 12> kMonthNames{"January",   "February", "March",    "April",
+                                                  "May",       "June",     "July",     "August",
+                                                  "September", "October",  "November", "December"};
+
+// February is given 29 so a leap-year birthday can be entered.
+constexpr std::array<int, 12> kDaysInMonth{31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+
+// Indexed by the 3DS country code. The gaps are codes the console does not assign.
+constexpr std::array<const char*, 187> kCountryNames{
+    "",
+    "Japan",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "Anguilla",
+    "Antigua and Barbuda",
+    "Argentina",
+    "Aruba",
+    "Bahamas",
+    "Barbados",
+    "Belize",
+    "Bolivia",
+    "Brazil",
+    "British Virgin Islands",
+    "Canada",
+    "Cayman Islands",
+    "Chile",
+    "Colombia",
+    "Costa Rica",
+    "Dominica",
+    "Dominican Republic",
+    "Ecuador",
+    "El Salvador",
+    "French Guiana",
+    "Grenada",
+    "Guadeloupe",
+    "Guatemala",
+    "Guyana",
+    "Haiti",
+    "Honduras",
+    "Jamaica",
+    "Martinique",
+    "Mexico",
+    "Montserrat",
+    "Netherlands Antilles",
+    "Nicaragua",
+    "Panama",
+    "Paraguay",
+    "Peru",
+    "Saint Kitts and Nevis",
+    "Saint Lucia",
+    "Saint Vincent and the Grenadines",
+    "Suriname",
+    "Trinidad and Tobago",
+    "Turks and Caicos Islands",
+    "United States",
+    "Uruguay",
+    "US Virgin Islands",
+    "Venezuela",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "Albania",
+    "Australia",
+    "Austria",
+    "Belgium",
+    "Bosnia and Herzegovina",
+    "Botswana",
+    "Bulgaria",
+    "Croatia",
+    "Cyprus",
+    "Czech Republic",
+    "Denmark",
+    "Estonia",
+    "Finland",
+    "France",
+    "Germany",
+    "Greece",
+    "Hungary",
+    "Iceland",
+    "Ireland",
+    "Italy",
+    "Latvia",
+    "Lesotho",
+    "Liechtenstein",
+    "Lithuania",
+    "Luxembourg",
+    "Macedonia",
+    "Malta",
+    "Montenegro",
+    "Mozambique",
+    "Namibia",
+    "Netherlands",
+    "New Zealand",
+    "Norway",
+    "Poland",
+    "Portugal",
+    "Romania",
+    "Russia",
+    "Serbia",
+    "Slovakia",
+    "Slovenia",
+    "South Africa",
+    "Spain",
+    "Swaziland",
+    "Sweden",
+    "Switzerland",
+    "Turkey",
+    "United Kingdom",
+    "Zambia",
+    "Zimbabwe",
+    "Azerbaijan",
+    "Mauritania",
+    "Mali",
+    "Niger",
+    "Chad",
+    "Sudan",
+    "Eritrea",
+    "Djibouti",
+    "Somalia",
+    "Andorra",
+    "Gibraltar",
+    "Guernsey",
+    "Isle of Man",
+    "Jersey",
+    "Monaco",
+    "Taiwan",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "South Korea",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "Hong Kong",
+    "Macau",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "Indonesia",
+    "Singapore",
+    "Thailand",
+    "Philippines",
+    "Malaysia",
+    "",
+    "",
+    "",
+    "China",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "United Arab Emirates",
+    "India",
+    "Egypt",
+    "Oman",
+    "Qatar",
+    "Kuwait",
+    "Saudi Arabia",
+    "Syria",
+    "Bahrain",
+    "Jordan",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "San Marino",
+    "Vatican City",
+    "Bermuda",
+};
+
+// The profile data is kept in the CFG NAND savegame rather than config.ini.
+struct Profile {
+    std::u16string username;
+    int birth_month{1};
+    int birth_day{1};
+    int language{};
+    int sound_mode{};
+    int country{};
+    bool system_setup{};
+};
+
+std::shared_ptr<Service::CFG::Module> s_cfg;
+Profile s_profile;
+Profile s_profile_saved;
+bool s_profile_loaded = false;
+
+std::optional<int> s_play_coins;
+
+Service::CFG::Module& Cfg() {
+    if (!s_cfg) {
+        s_cfg = Service::CFG::GetModule(Core::System::GetInstance());
+    }
+    return *s_cfg;
+}
+
+Profile& GetProfile() {
+    if (!s_profile_loaded) {
+        auto& cfg = Cfg();
+        const auto [month, day] = cfg.GetBirthday();
+        s_profile.username = cfg.GetUsername();
+        s_profile.birth_month = std::clamp<int>(month, 1, 12);
+        s_profile.birth_day = std::clamp<int>(day, 1, kDaysInMonth[s_profile.birth_month - 1]);
+        s_profile.language = static_cast<int>(cfg.GetSystemLanguage());
+        s_profile.sound_mode = static_cast<int>(cfg.GetSoundOutputMode());
+        s_profile.country = cfg.GetCountryCode();
+        s_profile.system_setup = cfg.IsSystemSetupNeeded();
+        s_profile_saved = s_profile;
+        s_profile_loaded = true;
+    }
+    return s_profile;
+}
+
+int ReadPlayCoins() {
+    if (!s_play_coins) {
+        s_play_coins = Service::PTM::Module::GetPlayCoins();
+    }
+    return *s_play_coins;
+}
 
 constexpr std::array<const char*, 6> kTextureFilterNames{"None",       "Anime4K", "Bicubic",
                                                          "ScaleForce", "xBRZ",    "MMPX"};
@@ -293,18 +541,91 @@ SettingsRow RegionRow() {
             }};
 }
 
+// An integer field of the staged profile stepped through `names`.
+template <std::size_t N>
+SettingsRow ProfileChoice(const char* label, int Profile::*field,
+                          const std::array<const char*, N>& names) {
+    return {label,
+            [field, &names] {
+                const auto index = static_cast<std::size_t>(GetProfile().*field);
+                return std::string{index < names.size() ? names[index] : "Unknown"};
+            },
+            [field, &names](int dir) {
+                Profile& profile = GetProfile();
+                profile.*field =
+                    std::clamp(profile.*field + dir, 0, static_cast<int>(N) - 1);
+            }};
+}
+
 SettingsRow LanguageRow() {
-    return {
-        "System Language",
-        [] {
-            const std::size_t index = static_cast<std::size_t>(ReadLanguage());
-            return std::string{index < kLanguageNames.size() ? kLanguageNames[index] : "English"};
-        },
-        [](int dir) {
-            s_language =
-                std::clamp(ReadLanguage() + dir, 0, static_cast<int>(kLanguageNames.size()) - 1);
-            s_language_dirty = true;
-        }};
+    return ProfileChoice("System Language", &Profile::language, kLanguageNames);
+}
+
+SettingsRow SoundOutputRow() {
+    return ProfileChoice("Sound Output", &Profile::sound_mode, kSoundOutputNames);
+}
+
+SettingsRow UsernameRow() {
+    return {"Username",
+            [] {
+                const std::string name = Common::UTF16ToUTF8(GetProfile().username);
+                return name.empty() ? std::string{"Not set"} : name;
+            },
+            {},
+            SettingsModal::Username};
+}
+
+SettingsRow BirthMonthRow() {
+    return {"Birthday Month",
+            [] {
+                const auto index = static_cast<std::size_t>(GetProfile().birth_month - 1);
+                return std::string{index < kMonthNames.size() ? kMonthNames[index] : "January"};
+            },
+            [](int dir) {
+                Profile& profile = GetProfile();
+                profile.birth_month = std::clamp(profile.birth_month + dir, 1, 12);
+                profile.birth_day =
+                    std::min(profile.birth_day, kDaysInMonth[profile.birth_month - 1]);
+            }};
+}
+
+SettingsRow BirthDayRow() {
+    return {"Birthday Day", [] { return std::to_string(GetProfile().birth_day); },
+            [](int dir) {
+                Profile& profile = GetProfile();
+                profile.birth_day = std::clamp(profile.birth_day + dir, 1,
+                                               kDaysInMonth[profile.birth_month - 1]);
+            }};
+}
+
+const char* CountryName(int code) {
+    const auto index = static_cast<std::size_t>(code);
+    if (index >= kCountryNames.size() || kCountryNames[index][0] == '\0') {
+        return "Unknown";
+    }
+    return kCountryNames[index];
+}
+
+SettingsRow CountryRow() {
+    return {"Country",
+            [] {
+                const int code = GetProfile().country;
+                const std::string name{CountryName(code)};
+                return IsCountryValidForRegion(code) ? name : name + " (wrong region)";
+            },
+            {},
+            SettingsModal::Country};
+}
+
+SettingsRow SystemSetupRow() {
+    const auto get = [] { return GetProfile().system_setup; };
+    return {"System Setup Required", [get] { return BoolText(get()); },
+            [](int dir) { GetProfile().system_setup = dir > 0; }, SettingsModal::None, get};
+}
+
+SettingsRow PlayCoinsRow() {
+    return {"Play Coins", [] { return std::to_string(ReadPlayCoins()); },
+            [](int dir) { s_play_coins = std::clamp(ReadPlayCoins() + dir, 0, 300); }};
 }
 
 // The kernel takes the offset in seconds.
@@ -320,6 +641,86 @@ SettingsRow ClockOffsetRow() {
                     std::clamp<long long>(setting.GetValue() / 86400 + dir, -3650, 3650);
                 setting = static_cast<s64>(days * 86400);
             }};
+}
+
+SettingsRow FixedClockRow() {
+    return {"Fixed Clock Time", GetFixedClockText, {}, SettingsModal::FixedClock};
+}
+
+SettingsRow InitTicksValueRow() {
+    return {"Initial Ticks Value", GetInitTicksText, {}, SettingsModal::InitTicksValue};
+}
+
+SettingsRow ConsoleIdRow() {
+    return {"Console ID", GetConsoleIdText, {}, SettingsModal::ConsoleId};
+}
+
+SettingsRow MacAddressRow() {
+    return {"MAC Address", GetMacAddressText, {}, SettingsModal::MacAddress};
+}
+
+// Reading the status touches the disk, so it is snapshotted when the page is built.
+SettingsRow UniqueDataRow(UniqueDataFile file) {
+    const auto modal = static_cast<SettingsModal>(
+        static_cast<int>(SettingsModal::InstallSecureInfo) + static_cast<int>(file));
+    const std::string status = UniqueDataStatus(file);
+    return {UniqueDataFileName(file), [status] { return status; }, {}, modal};
+}
+
+bool IsLeapYear(int year) {
+    return (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+}
+
+int DaysInMonth(int year, int month) {
+    if (month == 2) {
+        return IsLeapYear(year) ? 29 : 28;
+    }
+    return kDaysInMonth[month - 1];
+}
+
+// Days since 1970-01-01 since newlib has no timegm().
+long long DaysFromCivil(int year, int month, int day) {
+    year -= month <= 2 ? 1 : 0;
+    const long long era = (year >= 0 ? year : year - 399) / 400;
+    const long long year_of_era = year - era * 400;
+    const long long day_of_year =
+        (153 * (month + (month > 2 ? -3 : 9)) + 2) / 5 + day - 1;
+    const long long day_of_era =
+        year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    return era * 146097 + day_of_era - 719468;
+}
+
+std::string UniqueDataPath(UniqueDataFile file) {
+    switch (file) {
+    case UniqueDataFile::SecureInfo:
+        return HW::UniqueData::GetSecureInfoAPath();
+    case UniqueDataFile::FriendCodeSeed:
+        return HW::UniqueData::GetLocalFriendCodeSeedBPath();
+    case UniqueDataFile::Otp:
+        return HW::UniqueData::GetOTPPath();
+    default:
+        return HW::UniqueData::GetMovablePath();
+    }
+}
+
+HW::UniqueData::SecureDataLoadStatus LoadUniqueData(UniqueDataFile file) {
+    switch (file) {
+    case UniqueDataFile::SecureInfo:
+        return HW::UniqueData::LoadSecureInfoA();
+    case UniqueDataFile::FriendCodeSeed:
+        return HW::UniqueData::LoadLocalFriendCodeSeedB();
+    case UniqueDataFile::Otp:
+        return HW::UniqueData::LoadOTP();
+    default:
+        return HW::UniqueData::LoadMovable();
+    }
+}
+
+SettingsRow UnlinkConsoleRow() {
+    return {"Unlink Console",
+            [] { return std::string{IsConsoleLinked() ? "Linked" : "Not linked"}; },
+            {},
+            SettingsModal::UnlinkConsole};
 }
 
 SettingsRow LargeScreenProportionRow() {
@@ -474,6 +875,8 @@ const char* SettingsPageName(SettingsPage page) {
         return "General";
     case SettingsPage::System:
         return "System";
+    case SettingsPage::Console:
+        return "Console";
     case SettingsPage::Graphics:
         return "Graphics";
     case SettingsPage::Enhancements:
@@ -514,15 +917,36 @@ std::vector<SettingsRow> BuildSettingsPage(SettingsPage page) {
         return {
             Toggle("New 3DS Mode", v.is_new_3ds),
             RegionRow(),
+            UsernameRow(),
+            BirthMonthRow(),
+            BirthDayRow(),
             LanguageRow(),
+            CountryRow(),
+            SoundOutputRow(),
+            PlayCoinsRow(),
+            SystemSetupRow(),
             Toggle("LLE Applets", v.lle_applets),
             Toggle("Required Online LLE Modules", v.enable_required_online_lle_modules),
             Toggle("Region Free Patch", v.apply_region_free_patch),
             Choice("Clock Source", v.init_clock, kInitClockNames),
+            FixedClockRow(),
             ClockOffsetRow(),
+            Choice("Initial Ticks", v.init_ticks_type, kInitTicksNames),
+            InitTicksValueRow(),
             Number("Pedometer Steps Per Hour", v.steps_per_hour, 0, 10000, 100),
             Toggle("Plugin Loader", v.plugin_loader_enabled),
             Toggle("Allow Games To Change Plugin Loader", v.allow_plugin_loader),
+        };
+    case SettingsPage::Console:
+        return {
+            ConsoleIdRow(),
+            MacAddressRow(),
+            UniqueDataRow(UniqueDataFile::SecureInfo),
+            UniqueDataRow(UniqueDataFile::FriendCodeSeed),
+            UniqueDataRow(UniqueDataFile::Otp),
+            UniqueDataRow(UniqueDataFile::Movable),
+            UnlinkConsoleRow(),
+            Toggle("Unique Data Console Type", v.toggle_unique_data_console_type),
         };
     case SettingsPage::Graphics:
         return {
@@ -623,7 +1047,6 @@ std::vector<SettingsRow> BuildSettingsPage(SettingsPage page) {
             Toggle("Fastmem (restart)", v.fastmem),
             Toggle("Deterministic Async Operations", v.deterministic_async_operations),
             Toggle("Delay Start For LLE Modules", v.delay_start_for_lle_modules),
-            Toggle("Unique Data Console Type", v.toggle_unique_data_console_type),
             Toggle("Break On Unmapped Memory", v.break_on_unmapped_memory_access),
             Toggle("Renderer Debug", v.renderer_debug),
             Toggle("Dump Command Buffers", v.dump_command_buffers),
@@ -736,18 +1159,231 @@ void SetLogFilter(const std::string& filter) {
     Common::Log::SetGlobalFilter(log_filter);
 }
 
+std::string GetProfileUsername() {
+    return Common::UTF16ToUTF8(GetProfile().username);
+}
+
+void SetProfileUsername(const std::string& name) {
+    std::u16string wide = Common::UTF8ToUTF16(name);
+    if (wide.size() > 10) {
+        wide.resize(10);
+    }
+    GetProfile().username = wide;
+}
+
+const std::vector<CountryOption>& CountryOptions() {
+    static const std::vector<CountryOption> options = [] {
+        std::vector<CountryOption> list;
+        for (std::size_t i = 0; i < kCountryNames.size(); ++i) {
+            if (kCountryNames[i][0] != '\0') {
+                list.push_back({static_cast<int>(i), kCountryNames[i]});
+            }
+        }
+        return list;
+    }();
+    return options;
+}
+
+int GetProfileCountry() {
+    return GetProfile().country;
+}
+
+void SetProfileCountry(int code) {
+    GetProfile().country = code;
+}
+
+bool IsCountryValidForRegion(int code) {
+    const s32 region = Settings::values.region_value.GetValue();
+    if (region == Settings::REGION_VALUE_AUTO_SELECT) {
+        return true;
+    }
+    return Service::CFG::Module::IsValidRegionCountry(static_cast<u32>(region),
+                                                      static_cast<u8>(code));
+}
+
+std::string GetFixedClockText() {
+    const auto time = static_cast<std::time_t>(Settings::values.init_time.GetValue());
+    std::tm tm{};
+    if (gmtime_r(&time, &tm) == nullptr) {
+        return "2000-01-01 00:00:00";
+    }
+    char buffer[32];
+    std::snprintf(buffer, sizeof(buffer), "%04d-%02d-%02d %02d:%02d:%02d", tm.tm_year + 1900,
+                  tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
+    return buffer;
+}
+
+bool SetFixedClockText(const std::string& text) {
+    int year = 0;
+    int month = 0;
+    int day = 0;
+    int hour = 0;
+    int minute = 0;
+    int second = 0;
+    if (std::sscanf(text.c_str(), "%d-%d-%d %d:%d:%d", &year, &month, &day, &hour, &minute,
+                    &second) != 6) {
+        return false;
+    }
+    if (year < 2000 || year > 9999 || month < 1 || month > 12 || hour < 0 || hour > 23 ||
+        minute < 0 || minute > 59 || second < 0 || second > 59) {
+        return false;
+    }
+    if (day < 1 || day > DaysInMonth(year, month)) {
+        return false;
+    }
+    Settings::values.init_time =
+        static_cast<u64>(DaysFromCivil(year, month, day)) * 86400 +
+        static_cast<u64>(hour) * 3600 + static_cast<u64>(minute) * 60 + static_cast<u64>(second);
+    return true;
+}
+
+std::string GetInitTicksText() {
+    return std::to_string(Settings::values.init_ticks_override.GetValue());
+}
+
+void SetInitTicksText(const std::string& text) {
+    try {
+        Settings::values.init_ticks_override = static_cast<s64>(std::stoll(text));
+    } catch (const std::exception&) {
+        // Leave the old value in place on anything unparsable.
+    }
+}
+
+std::string GetConsoleIdText() {
+    char buffer[24];
+    std::snprintf(buffer, sizeof(buffer), "0x%016llX",
+                  static_cast<unsigned long long>(Cfg().GetConsoleUniqueId()));
+    return buffer;
+}
+
+std::string GetMacAddressText() {
+    return Cfg().GetMacAddress();
+}
+
+void RegenerateConsoleId() {
+    auto& cfg = Cfg();
+    const auto [random_number, console_id] = cfg.GenerateConsoleUniqueId();
+    cfg.SetConsoleUniqueId(random_number, console_id);
+    cfg.UpdateConfigNANDSavegame();
+}
+
+void RegenerateMacAddress() {
+    auto& cfg = Cfg();
+    cfg.GetMacAddress() = Service::CFG::GenerateRandomMAC();
+    cfg.SaveMacAddress();
+}
+
+const char* UniqueDataFileName(UniqueDataFile file) {
+    switch (file) {
+    case UniqueDataFile::SecureInfo:
+        return "SecureInfo_A";
+    case UniqueDataFile::FriendCodeSeed:
+        return "LocalFriendCodeSeed_B";
+    case UniqueDataFile::Otp:
+        return "OTP";
+    case UniqueDataFile::Movable:
+        return "movable.sed";
+    default:
+        return "";
+    }
+}
+
+std::string UniqueDataStatus(UniqueDataFile file) {
+    switch (LoadUniqueData(file)) {
+    case HW::UniqueData::SecureDataLoadStatus::Loaded:
+        return "Loaded";
+    case HW::UniqueData::SecureDataLoadStatus::InvalidSignature:
+        return "Invalid signature";
+    case HW::UniqueData::SecureDataLoadStatus::RegionChanged:
+        return "Loaded, region changed";
+    case HW::UniqueData::SecureDataLoadStatus::CannotValidateSignature:
+        return "Loaded, unverified";
+    case HW::UniqueData::SecureDataLoadStatus::NotFound:
+        return "Not found";
+    case HW::UniqueData::SecureDataLoadStatus::Invalid:
+        return "Invalid";
+    case HW::UniqueData::SecureDataLoadStatus::IOError:
+        return "Read error";
+    case HW::UniqueData::SecureDataLoadStatus::NoCryptoKeys:
+        return "Missing keys";
+    default:
+        return "Unknown";
+    }
+}
+
+bool InstallUniqueDataFile(UniqueDataFile file, const std::string& from) {
+    const std::string source =
+        FileUtil::SanitizePath(from, FileUtil::DirectorySeparator::PlatformDefault);
+    const std::string destination =
+        FileUtil::SanitizePath(UniqueDataPath(file), FileUtil::DirectorySeparator::PlatformDefault);
+    if (source.empty() || destination.empty() || source == destination) {
+        return false;
+    }
+    FileUtil::CreateFullPath(destination);
+    if (!FileUtil::Copy(source, destination)) {
+        return false;
+    }
+    HW::UniqueData::InvalidateSecureData();
+    return true;
+}
+
+bool IsConsoleLinked() {
+    return HW::UniqueData::IsFullConsoleLinked();
+}
+
+void UnlinkConsole() {
+    HW::UniqueData::UnlinkConsole();
+}
+
+void RefreshSystemSettings() {
+    s_cfg.reset();
+    s_profile_loaded = false;
+    s_play_coins.reset();
+}
+
 void CommitSettings() {
     SaveConfig();
-    if (!s_language_dirty) {
-        return;
+
+    if (s_play_coins && *s_play_coins != Service::PTM::Module::GetPlayCoins()) {
+        Service::PTM::Module::SetPlayCoins(static_cast<u16>(*s_play_coins));
     }
-    s_language_dirty = false;
-    auto cfg = Service::CFG::GetModule(Core::System::GetInstance());
-    const auto language = static_cast<Service::CFG::SystemLanguage>(*s_language);
-    if (cfg->GetSystemLanguage() != language) {
-        cfg->SetSystemLanguage(language);
-        cfg->UpdateConfigNANDSavegame();
+
+    if (s_profile_loaded) {
+        auto& cfg = Cfg();
+        bool modified = false;
+        const Profile& now = s_profile;
+        const Profile& before = s_profile_saved;
+        if (now.username != before.username) {
+            cfg.SetUsername(now.username);
+            modified = true;
+        }
+        if (now.birth_month != before.birth_month || now.birth_day != before.birth_day) {
+            cfg.SetBirthday(static_cast<u8>(now.birth_month), static_cast<u8>(now.birth_day));
+            modified = true;
+        }
+        if (now.language != before.language) {
+            cfg.SetSystemLanguage(static_cast<Service::CFG::SystemLanguage>(now.language));
+            modified = true;
+        }
+        if (now.sound_mode != before.sound_mode) {
+            cfg.SetSoundOutputMode(static_cast<Service::CFG::SoundOutputMode>(now.sound_mode));
+            modified = true;
+        }
+        // SetCountryCode also resets the state code, so it is only written when it changed.
+        if (now.country != before.country) {
+            cfg.SetCountryCode(static_cast<u8>(now.country));
+            modified = true;
+        }
+        if (now.system_setup != before.system_setup) {
+            cfg.SetSystemSetupNeeded(now.system_setup);
+            modified = true;
+        }
+        if (modified) {
+            cfg.UpdateConfigNANDSavegame();
+        }
     }
+
+    RefreshSystemSettings();
 }
 
 } // namespace SwitchFrontend

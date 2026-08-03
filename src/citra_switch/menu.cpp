@@ -572,21 +572,26 @@ std::optional<int> SettingsTabHitTest(int x, int y, int active) {
     return std::nullopt;
 }
 
-// swkbd prompt for the one text setting.
-std::string PromptLogFilter(const std::string& initial) {
+// swkbd prompt for the text-valued settings rows.
+std::optional<std::string> PromptSettingText(const char* header, const char* guide,
+                                             const std::string& initial, int max_length) {
     SwkbdConfig kbd;
     if (R_FAILED(swkbdCreate(&kbd, 0))) {
-        return initial;
+        return std::nullopt;
     }
     swkbdConfigMakePresetDefault(&kbd);
-    swkbdConfigSetHeaderText(&kbd, "Log filter");
-    swkbdConfigSetGuideText(&kbd, "e.g. *:Info Render:Debug");
+    swkbdConfigSetHeaderText(&kbd, header);
+    swkbdConfigSetGuideText(&kbd, guide);
     swkbdConfigSetInitialText(&kbd, initial.c_str());
-    swkbdConfigSetStringLenMax(&kbd, 255);
-    char out[512] = {};
-    const Result rc = swkbdShow(&kbd, out, sizeof(out));
+    swkbdConfigSetStringLenMax(&kbd, max_length);
+    // swkbd counts the limit in characters, which UTF-8 can take four bytes each of.
+    std::vector<char> out(static_cast<std::size_t>(max_length) * 4 + 1, '\0');
+    const Result rc = swkbdShow(&kbd, out.data(), out.size());
     swkbdClose(&kbd);
-    return R_SUCCEEDED(rc) ? std::string{out} : initial;
+    if (R_FAILED(rc)) {
+        return std::nullopt;
+    }
+    return std::string{out.data()};
 }
 
 // Rows on the Paths page.
@@ -629,6 +634,10 @@ enum ArticRow {
     ArticRowController,
     ArticRowCount,
 };
+
+// The country picker is the one modal list long enough to need paging.
+constexpr int kCountryRows = 9;
+constexpr int kCountryRowH = 40;
 
 // The folder browser covers the whole screen, rail included.
 constexpr int kBrowseTop = 108;
@@ -1051,6 +1060,8 @@ public:
                 HandleConfirm(down);
             } else if (preset_picker_open) {
                 HandlePresetPicker(down, nav);
+            } else if (country_picker_open) {
+                HandleCountryPicker(down, nav);
             } else if (layout_picker_open) {
                 HandleLayoutPicker(down, nav);
             } else if (remap_open) {
@@ -1081,7 +1092,7 @@ public:
             }
 
             if (!install_active && !details_open && !layout_picker_open && !remap_open &&
-                !preset_picker_open && !confirm) {
+                !preset_picker_open && !country_picker_open && !confirm) {
                 HandleTouch();
             }
             if (pending_launch) {
@@ -1157,6 +1168,10 @@ private:
     // Preset picker the reset row opens.
     bool preset_picker_open = false;
     int preset_sel = 0;
+
+    bool country_picker_open = false;
+    int country_sel = 0;
+    int country_scroll = 0;
 
     // Controller remapping page.
     bool remap_open = false;
@@ -1539,8 +1554,11 @@ private:
             OpenRemap();
             break;
         case SettingsModal::LogFilter:
-            SetLogFilter(PromptLogFilter(GetLogFilter()));
-            settings_dirty = true;
+            if (const auto text = PromptSettingText("Log filter", "e.g. *:Info Render:Debug",
+                                                    GetLogFilter(), 255)) {
+                SetLogFilter(*text);
+                settings_dirty = true;
+            }
             break;
         case SettingsModal::ResetDefaults:
             OpenPresetPicker();
@@ -1548,8 +1566,162 @@ private:
         case SettingsModal::ClearShaderCache:
             OpenShaderCacheConfirm();
             break;
+        case SettingsModal::Username:
+            if (const auto text = PromptSettingText("Username", "Name shown to other consoles",
+                                                    GetProfileUsername(), 10)) {
+                SetProfileUsername(*text);
+                settings_dirty = true;
+            }
+            break;
+        case SettingsModal::Country:
+            OpenCountryPicker();
+            break;
+        case SettingsModal::FixedClock:
+            if (const auto text = PromptSettingText("Fixed clock time", "YYYY-MM-DD HH:MM:SS",
+                                                    GetFixedClockText(), 19)) {
+                if (SetFixedClockText(*text)) {
+                    settings_dirty = true;
+                } else {
+                    ShowNotice("Enter the time as YYYY-MM-DD HH:MM:SS", true);
+                }
+            }
+            break;
+        case SettingsModal::InitTicksValue:
+            if (const auto text = PromptSettingText("Initial ticks", "CPU tick count",
+                                                    GetInitTicksText(), 20)) {
+                SetInitTicksText(*text);
+                settings_dirty = true;
+            }
+            break;
+        case SettingsModal::ConsoleId:
+            OpenConsoleIdConfirm();
+            break;
+        case SettingsModal::MacAddress:
+            OpenMacConfirm();
+            break;
+        case SettingsModal::UnlinkConsole:
+            OpenUnlinkConfirm();
+            break;
+        case SettingsModal::InstallSecureInfo:
+        case SettingsModal::InstallFriendCodeSeed:
+        case SettingsModal::InstallOtp:
+        case SettingsModal::InstallMovable:
+            InstallUniqueData(static_cast<UniqueDataFile>(
+                static_cast<int>(modal) - static_cast<int>(SettingsModal::InstallSecureInfo)));
+            break;
         default:
             break;
+        }
+    }
+
+    void OpenCountryPicker() {
+        const std::vector<CountryOption>& options = CountryOptions();
+        const int current = GetProfileCountry();
+        country_sel = 0;
+        for (int i = 0; i < static_cast<int>(options.size()); ++i) {
+            if (options[i].code == current) {
+                country_sel = i;
+                break;
+            }
+        }
+        country_scroll = 0;
+        country_picker_open = true;
+        ScrollCountryIntoView();
+    }
+
+    void ScrollCountryIntoView() {
+        const int count = static_cast<int>(CountryOptions().size());
+        country_scroll = std::clamp(country_scroll, std::max(0, country_sel - kCountryRows + 1),
+                                    std::max(0, std::min(country_sel, count - kCountryRows)));
+    }
+
+    void HandleCountryPicker(u64 down, u32 nav) {
+        const int count = static_cast<int>(CountryOptions().size());
+        if (nav & DirUp) {
+            country_sel = (country_sel - 1 + count) % count;
+        }
+        if (nav & DirDown) {
+            country_sel = (country_sel + 1) % count;
+        }
+        // A long list is worth paging through with the shoulders.
+        if (down & HidNpadButton_L) {
+            country_sel = std::max(0, country_sel - kCountryRows);
+        }
+        if (down & HidNpadButton_R) {
+            country_sel = std::min(count - 1, country_sel + kCountryRows);
+        }
+        ScrollCountryIntoView();
+        if (down & HidNpadButton_A) {
+            SetProfileCountry(CountryOptions()[country_sel].code);
+            settings_dirty = true;
+            country_picker_open = false;
+        }
+        if (down & HidNpadButton_B) {
+            country_picker_open = false;
+        }
+    }
+
+    void OpenConsoleIdConfirm() {
+        confirm = ConfirmPrompt{
+            "Generate a new console ID?",
+            {"The current virtual console ID is replaced and cannot be",
+             "recovered. Some applications react badly to the change."},
+            "This can fail on an outdated config save.",
+            "Generate",
+            [this] {
+                RegenerateConsoleId();
+                ShowNotice("Console ID regenerated", false);
+            }};
+    }
+
+    void OpenMacConfirm() {
+        confirm = ConfirmPrompt{
+            "Generate a new MAC address?",
+            {"The current MAC address is replaced with a random one."},
+            "Keep the old one if you took it from your own console.",
+            "Generate",
+            [this] {
+                RegenerateMacAddress();
+                ShowNotice("MAC address regenerated", false);
+            }};
+    }
+
+    void OpenUnlinkConfirm() {
+        if (!IsConsoleLinked()) {
+            ShowNotice("No console is linked", true);
+            return;
+        }
+        confirm = ConfirmPrompt{
+            "Unlink this console?",
+            {"The OTP, SecureInfo and LocalFriendCodeSeed are removed, your",
+             "friend list resets and you are logged out of your NNID/PNID.",
+             "System and eShop titles stay locked until you link it again."},
+            "Save data is not touched.",
+            "Unlink",
+            [this] {
+                UnlinkConsole();
+                SetSettingsPage(settings_page);
+                ShowNotice("Console unlinked", false);
+            }};
+    }
+
+    void InstallUniqueData(UniqueDataFile file) {
+        const std::string name{UniqueDataFileName(file)};
+        // movable.sed stands apart from the three files that together make a console linked.
+        if (file != UniqueDataFile::Movable && IsConsoleLinked()) {
+            ShowNotice("Unlink the console before replacing " + name, true);
+            return;
+        }
+        const std::string title = "Select " + name;
+        const std::optional<std::string> picked = BrowseForFile(title.c_str(), "sdmc:/");
+        if (!picked) {
+            return;
+        }
+        if (InstallUniqueDataFile(file, *picked)) {
+            SetSettingsPage(settings_page);
+            ShowNotice(name + " installed", false);
+        } else {
+            ShowNotice("Could not install " + name, true);
         }
     }
 
@@ -2050,8 +2222,19 @@ private:
     // An empty `dir` lists the mounted devices, which is the only way onto storage other
     // than the SD card.
     std::optional<std::string> BrowseForFolder(const std::string& start) {
+        return Browse("Select folder", start, false);
+    }
+
+    std::optional<std::string> BrowseForFile(const char* title, const std::string& start) {
+        return Browse(title, start, true);
+    }
+
+    // The shared folder/file browser. In file mode the files in the current folder are listed
+    // below its subfolders and A returns one; in folder mode + returns the folder itself.
+    std::optional<std::string> Browse(const char* title, const std::string& start, bool pick_file) {
         std::string dir = EnsureDirectory(start) ? start : std::string{"sdmc:/"};
         std::vector<DirEntry> entries = ListSubdirectories(dir);
+        std::vector<FileEntry> files = pick_file ? ListFilesIn(dir) : std::vector<FileEntry>{};
         int sel = 0;
         int scroll = 0;
         Repeater rep;
@@ -2059,6 +2242,7 @@ private:
         auto Enter = [&](const std::string& next, const std::string& highlight) {
             dir = next;
             entries = dir.empty() ? ListDevices() : ListSubdirectories(dir);
+            files = pick_file && !dir.empty() ? ListFilesIn(dir) : std::vector<FileEntry>{};
             const int base = dir.empty() ? 0 : 1;
             sel = 0;
             scroll = 0;
@@ -2081,7 +2265,8 @@ private:
             const std::string parent = dir.empty() ? "" : ParentDirectory(dir);
             // Row 0 is ".." everywhere but the device list, which a device root steps up into.
             const int base = dir.empty() ? 0 : 1;
-            const int count = static_cast<int>(entries.size()) + base;
+            const int dirs = static_cast<int>(entries.size());
+            const int count = dirs + static_cast<int>(files.size()) + base;
             sel = std::clamp(sel, 0, std::max(0, count - 1));
 
             if (nav & DirUp) {
@@ -2095,8 +2280,10 @@ private:
             if (down & HidNpadButton_A) {
                 if (base == 1 && sel == 0) {
                     Enter(parent, dir);
-                } else if (sel >= base && sel - base < static_cast<int>(entries.size())) {
+                } else if (sel - base < dirs) {
                     Enter(entries[sel - base].path, "");
+                } else {
+                    return files[sel - base - dirs].path;
                 }
             }
             if (down & HidNpadButton_B) {
@@ -2108,23 +2295,24 @@ private:
             if (down & HidNpadButton_Y) {
                 return std::nullopt;
             }
-            if ((down & HidNpadButton_Plus) && !dir.empty()) {
+            if (!pick_file && (down & HidNpadButton_Plus) && !dir.empty()) {
                 return dir;
             }
 
-            DrawBrowser(dir, entries, sel, scroll);
+            DrawBrowser(title, dir, entries, files, sel, scroll, pick_file);
             Present();
         }
         return std::nullopt;
     }
 
-    void DrawBrowser(const std::string& dir, const std::vector<DirEntry>& entries, int sel,
-                     int scroll) {
+    void DrawBrowser(const char* title, const std::string& dir,
+                     const std::vector<DirEntry>& entries, const std::vector<FileEntry>& files,
+                     int sel, int scroll, bool pick_file) {
         Canvas& c = canvas;
         c.Clear(kColBg);
 
         const bool devices = dir.empty();
-        g_font.Draw(c, 40, 44, devices ? "Select device" : "Select folder", 28, kColText);
+        g_font.Draw(c, 40, 44, devices ? "Select device" : title, 28, kColText);
         g_font.Draw(c, 40, 76,
                     devices ? std::string{"Mounted devices"}
                             : g_font.TruncateFront(dir, 20, g_screen_w - 80),
@@ -2133,10 +2321,12 @@ private:
 
         const bool has_parent = !devices;
         const int base = has_parent ? 1 : 0;
-        const int count = static_cast<int>(entries.size()) + base;
+        const int dirs = static_cast<int>(entries.size());
+        const int count = dirs + static_cast<int>(files.size()) + base;
 
         if (count == 0) {
-            g_font.Draw(c, 52, kBrowseTop + 30, "No subfolders here", 20, kColTextDim);
+            g_font.Draw(c, 52, kBrowseTop + 30, pick_file ? "Nothing here" : "No subfolders here",
+                        20, kColTextDim);
         }
         for (int i = scroll; i < std::min(count, scroll + BrowseRows()); ++i) {
             const int y = kBrowseTop + (i - scroll) * kBrowseRowH;
@@ -2145,7 +2335,10 @@ private:
                 c.FillRoundRect(32, y + 8, 4, kBrowseRowH - 20, 2, kColAccent);
             }
             const bool up = has_parent && i == 0;
-            const std::string name = up ? ".." : entries[i - base].name + "/";
+            const bool is_dir = up || i - base < dirs;
+            const std::string name = up      ? ".."
+                                     : is_dir ? entries[i - base].name + "/"
+                                              : files[i - base - dirs].name;
             g_font.Draw(c, 52, CenterBaseline(y, kBrowseRowH - 4, 20),
                         g_font.Truncate(name, 20, g_screen_w - 128), 20,
                         up ? kColTextDim : kColText);
@@ -2156,9 +2349,9 @@ private:
         c.FillRect(0, ContentBottom(), g_screen_w, 1, kColRail);
         int hx = 40;
         const int hy = ContentBottom() + (kHintH - 26) / 2;
-        hx += DrawHint(c, hx, hy, "A", "Open") + 22;
+        hx += DrawHint(c, hx, hy, "A", pick_file ? "Open / Select" : "Open") + 22;
         hx += DrawHint(c, hx, hy, "B", has_parent ? "Up" : "Cancel") + 22;
-        if (!devices) {
+        if (!devices && !pick_file) {
             hx += DrawHint(c, hx, hy, "+", "Select this folder") + 22;
         }
         DrawHint(c, hx, hy, "Y", "Cancel");
@@ -2358,6 +2551,9 @@ private:
         }
         if (preset_picker_open) {
             DrawPresetPicker(c);
+        }
+        if (country_picker_open) {
+            DrawCountryPicker(c);
         }
         if (remap_open) {
             DrawRemapPage(c);
@@ -2741,6 +2937,53 @@ private:
         DrawHint(c, hx, hy, "B", "Cancel");
     }
 
+    // A centred modal to choose the profile's country from the console's full list.
+    void DrawCountryPicker(Canvas& c) {
+        const std::vector<CountryOption>& options = CountryOptions();
+        const int count = static_cast<int>(options.size());
+        const int w = std::min(620, g_screen_w - 48);
+        constexpr int top_pad = 78;    // Room for the title and subtitle.
+        constexpr int bottom_pad = 56; // Room for the button hints.
+        const int h = top_pad + kCountryRows * kCountryRowH + bottom_pad;
+        const int x = (g_screen_w - w) / 2;
+        const int y = (g_screen_h - h) / 2;
+        c.FillRect(0, 0, g_screen_w, g_screen_h, MakeColor(0x10, 0x11, 0x13, 0xC0));
+        c.RoundBorder(x, y, w, h, 14, 2, kColBadge, kColSurface);
+
+        g_font.Draw(c, x + 24, y + 40, "Country", 24, kColText);
+        g_font.Draw(c, x + 24, y + 64, "Where the console reports it is being used", 16,
+                    kColTextDim);
+
+        const int selected_code = GetProfileCountry();
+        for (int i = country_scroll; i < std::min(count, country_scroll + kCountryRows); ++i) {
+            const int ry = y + top_pad + (i - country_scroll) * kCountryRowH;
+            const int rx = x + 16;
+            const int rw = w - 32;
+            if (i == country_sel) {
+                c.FillRoundRect(rx, ry, rw, kCountryRowH - 4, 8, kColSurfaceHi);
+                c.FillRoundRect(rx, ry + 8, 4, kCountryRowH - 20, 2, kColAccent);
+            }
+            const bool current = options[i].code == selected_code;
+            g_font.Draw(c, rx + 20, CenterBaseline(ry, kCountryRowH - 4, 20),
+                        g_font.Truncate(options[i].name, 20, rw - 140), 20,
+                        current ? kColAccent : kColText);
+            // Countries outside the configured region are still selectable, just flagged.
+            if (!IsCountryValidForRegion(options[i].code)) {
+                const char* note = "wrong region";
+                g_font.Draw(c, rx + rw - 24 - g_font.Measure(note, 16),
+                            CenterBaseline(ry, kCountryRowH - 4, 16), note, 16, kColTextDim);
+            }
+        }
+        DrawListScrollbar(c, x + w - 8, y + top_pad, kCountryRows, kCountryRowH, count,
+                          country_scroll);
+
+        int hx = x + 24;
+        const int hy = y + h - 38;
+        hx += DrawHint(c, hx, hy, "A", "Choose") + 22;
+        hx += DrawHint(c, hx, hy, "L R", "Page") + 22;
+        DrawHint(c, hx, hy, "B", "Cancel");
+    }
+
     // A centred modal to choose which layouts R3 cycles through in-game.
     void DrawLayoutPicker(Canvas& c) {
         const int count = GetScreenLayoutCount();
@@ -2952,6 +3195,8 @@ MenuResult RunMenu(PadState& pad) {
         // Exit on no font found.
         return {MenuAction::Exit, {}};
     }
+    // The last game may have written to the CFG savegame the System page reads.
+    RefreshSystemSettings();
     Menu menu;
     return menu.Run(pad);
 }

@@ -89,6 +89,13 @@ dump_textures = false
 [System]
 # Console region. -1: auto-select (default), 0: JPN, 1: USA, 2: EUR, 3: AUS, 4: CHN, 5: KOR, 6: TWN.
 region_value =
+# Where the emulated clock starts. 0: the Switch's clock (default), 1: the fixed time below.
+init_clock =
+# Fixed start-up time as a Unix timestamp, used when init_clock is 1.
+init_time =
+# Initial CPU tick count. 0: random (default), 1: the fixed value below.
+init_ticks_type =
+init_ticks_override =
 
 [Miscellaneous]
 # Log filter, e.g. "*:Info" (default) or "*:Debug Core.Cpu:Trace".

@@ -161,7 +161,10 @@ void VisitPersistedSettings(Visitor&& visit) {
     visit("System", v.enable_required_online_lle_modules);
     visit("System", v.apply_region_free_patch);
     visit("System", v.init_clock);
+    visit("System", v.init_time);
     visit("System", v.init_time_offset);
+    visit("System", v.init_ticks_type);
+    visit("System", v.init_ticks_override);
     visit("System", v.steps_per_hour);
     visit("System", v.plugin_loader_enabled);
     visit("System", v.allow_plugin_loader);

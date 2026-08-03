@@ -134,6 +134,9 @@ std::vector<DirEntry> ListDevices();
 // The subfolders of `directory`, sorted by name.
 std::vector<DirEntry> ListSubdirectories(const std::string& directory);
 
+// The files directly under `directory`, sorted by name.
+std::vector<FileEntry> ListFilesIn(const std::string& directory);
+
 // The parent of `directory`, or "" if it is already a device root such as "sdmc:/".
 std::string ParentDirectory(const std::string& directory);
 

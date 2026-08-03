@@ -565,6 +565,23 @@ std::vector<DirEntry> ListSubdirectories(const std::string& directory) {
     return out;
 }
 
+std::vector<FileEntry> ListFilesIn(const std::string& directory) {
+    std::vector<FileEntry> out;
+    FileUtil::ForeachDirectoryEntry(
+        nullptr, directory,
+        [&out](u64*, const std::string& dir, const std::string& virtual_name) {
+            const std::string path = dir + virtual_name;
+            if (!FileUtil::IsDirectory(path)) {
+                out.push_back({virtual_name, path});
+            }
+            return true;
+        });
+    std::sort(out.begin(), out.end(), [](const FileEntry& a, const FileEntry& b) {
+        return Common::ToLower(a.name) < Common::ToLower(b.name);
+    });
+    return out;
+}
+
 std::string ParentDirectory(const std::string& directory) {
     if (directory.size() <= 1) {
         return "";
