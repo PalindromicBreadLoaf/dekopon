@@ -50,6 +50,24 @@ void PrepareSystemFileSetup(SystemFileSetupMode mode);
 bool GetUseArticBaseController();
 void SetUseArticBaseController(bool enabled);
 
+// Which of the 3DS's three cameras the picked image feeds.
+enum class CameraTarget {
+    All,
+    Outer,
+    Inner,
+};
+
+constexpr int NumCameraTargets = 3;
+
+const char* CameraTargetName(CameraTarget target);
+
+// The image file the emulated cameras hand to the guest.
+const std::string& GetCameraImage();
+CameraTarget GetCameraTarget();
+
+// Points the cameras at `path`.
+void SetCameraImage(const std::string& path, CameraTarget target);
+
 // Clockwise rotation of the launcher and the in-game overlay, in degrees.
 int GetMenuRotation();
 void SetMenuRotation(int degrees);

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <initializer_list>
 #include <memory>
 #include <optional>
 
@@ -280,6 +281,34 @@ std::optional<InstalledTmd> ReadInstalledTmd(std::uint64_t tid) {
     return InstalledTmd{tmd.GetTitleVersion(), static_cast<int>(tmd.GetContentCount())};
 }
 
+// The files directly under `directory` carrying one of `extensions`, sorted by name.
+std::vector<FileEntry> ListFilesByExtension(const std::string& directory,
+                                            std::initializer_list<const char*> extensions) {
+    std::vector<FileEntry> out;
+    FileUtil::ForeachDirectoryEntry(
+        nullptr, directory,
+        [&out, &extensions](u64*, const std::string& dir, const std::string& virtual_name) {
+            const std::string path = dir + virtual_name;
+            if (FileUtil::IsDirectory(path)) {
+                return true;
+            }
+            std::string extension;
+            Common::SplitPath(path, nullptr, nullptr, &extension);
+            extension = Common::ToLower(extension);
+            for (const char* wanted : extensions) {
+                if (extension == wanted) {
+                    out.push_back({virtual_name, path});
+                    break;
+                }
+            }
+            return true;
+        });
+    std::sort(out.begin(), out.end(), [](const FileEntry& a, const FileEntry& b) {
+        return Common::ToLower(a.name) < Common::ToLower(b.name);
+    });
+    return out;
+}
+
 } // namespace
 
 TitleKind ClassifyTitle(std::uint64_t program_id) {
@@ -429,26 +458,12 @@ std::vector<CiaEntry> ListCiaFiles(const std::string& directory) {
     return out;
 }
 
-std::vector<AmiiboEntry> ListAmiiboFiles() {
-    std::vector<AmiiboEntry> out;
-    const std::string directory = GetActiveUserDir() + "amiibo/";
-    FileUtil::ForeachDirectoryEntry(
-        nullptr, directory, [&out](u64*, const std::string& dir, const std::string& virtual_name) {
-            const std::string path = dir + virtual_name;
-            if (FileUtil::IsDirectory(path)) {
-                return true;
-            }
-            std::string extension;
-            Common::SplitPath(path, nullptr, nullptr, &extension);
-            if (Common::ToLower(extension) == ".bin") {
-                out.push_back({virtual_name, path});
-            }
-            return true;
-        });
-    std::sort(out.begin(), out.end(), [](const AmiiboEntry& a, const AmiiboEntry& b) {
-        return Common::ToLower(a.name) < Common::ToLower(b.name);
-    });
-    return out;
+std::vector<FileEntry> ListAmiiboFiles() {
+    return ListFilesByExtension(GetActiveUserDir() + "amiibo/", {".bin"});
+}
+
+std::vector<FileEntry> ListCameraImages() {
+    return ListFilesByExtension(GetActiveUserDir() + "camera/", {".png", ".jpg", ".jpeg"});
 }
 
 InstallResult InstallCia(const std::string& path,

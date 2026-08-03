@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
+#include <array>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -14,10 +15,13 @@
 #include "common/logging/log.h"
 #include "common/settings.h"
 #include "common/string_util.h"
+#include "citra_switch/camera/still_image_camera.h"
 #include "citra_switch/config.h"
 #include "citra_switch/default_ini.h"
 #include "citra_switch/input.h"
 #include "citra_switch/overlay_menu.h"
+#include "core/frontend/camera/factory.h"
+#include "core/hle/service/cam/cam_params.h"
 #include "core/hle/service/service.h"
 #include "core/system_titles.h"
 #include "video_core/overlay.h"
@@ -60,8 +64,28 @@ SwitchFrontend::SwitchPaths s_paths;
 std::string s_active_user_dir;
 std::string s_inserted_cartridge;
 std::string s_artic_base_address;
+std::string s_camera_image;
+SwitchFrontend::CameraTarget s_camera_target = SwitchFrontend::CameraTarget::All;
 int s_menu_rotation = 0;
 bool s_menu_input_rotated = false;
+
+// Pushes the picked image onto the three camera slots the CAM service reads.
+void ApplyCameraSettings() {
+    namespace CAM = Service::CAM;
+
+    const bool inner = s_camera_target != SwitchFrontend::CameraTarget::Outer;
+    const bool outer = s_camera_target != SwitchFrontend::CameraTarget::Inner;
+    const std::array<bool, CAM::NumCameras> fed{outer, inner, outer};
+
+    for (int i = 0; i < CAM::NumCameras; ++i) {
+        const bool use_image = !s_camera_image.empty() && fed[static_cast<std::size_t>(i)];
+        Settings::values.camera_name[i] = use_image ? "image" : "blank";
+        Settings::values.camera_config[i] = use_image ? s_camera_image : std::string{};
+        // The inner camera faces the player, so its picture comes back mirrored on hardware.
+        Settings::values.camera_flip[i] =
+            use_image && i == CAM::InnerCamera ? static_cast<int>(CAM::Flip::Horizontal) : 0;
+    }
+}
 
 // Every Settings::values entry config.ini round-trips, in file order. Reading and writing share
 // this list so the two cannot drift apart.
@@ -203,6 +227,8 @@ public:
         const SwitchFrontend::SwitchPaths paths = s_paths;
         const std::string cartridge = s_inserted_cartridge;
         const std::string artic_address = s_artic_base_address;
+        const std::string camera_image = s_camera_image;
+        const SwitchFrontend::CameraTarget camera_target = s_camera_target;
         const int launches = launch_count;
 
         auto loaded = std::move(config);
@@ -213,6 +239,9 @@ public:
         s_paths = paths;
         s_inserted_cartridge = cartridge;
         s_artic_base_address = artic_address;
+        s_camera_image = camera_image;
+        s_camera_target = camera_target;
+        ApplyCameraSettings();
         launch_count = launches;
     }
 
@@ -323,6 +352,15 @@ private:
         SwitchFrontend::SetPauseInQuickMenu(
             config->GetBoolean("Switch", "pause_in_quick_menu", false));
 
+        s_camera_image = Common::StripSpaces(config->Get("Camera", "image", ""));
+        if (!s_camera_image.empty() && !FileUtil::Exists(s_camera_image)) {
+            s_camera_image.clear();
+        }
+        s_camera_target = static_cast<SwitchFrontend::CameraTarget>(
+            std::clamp<long>(config->GetInteger("Camera", "target", 0), 0,
+                             SwitchFrontend::NumCameraTargets - 1));
+        ApplyCameraSettings();
+
         SwitchFrontend::SetMenuRotation(
             static_cast<int>(config->GetInteger("Switch", "menu_rotation", 0)));
         SwitchFrontend::SetMenuInputRotated(
@@ -385,6 +423,10 @@ private:
            << '\n';
         ss << "launch_count = " << launch_count << "\n\n";
 
+        ss << "[Camera]\n";
+        ss << "image = " << s_camera_image << '\n';
+        ss << "target = " << static_cast<int>(s_camera_target) << "\n\n";
+
         ss << "[Experimental]\n";
         ss << "movie_cpu_throttle = "
            << (SwitchFrontend::IsMovieThrottleEnabled() ? "true" : "false") << '\n';
@@ -446,9 +488,13 @@ int Bootstrap() {
     s_active_user_dir = FileUtil::GetUserPath(FileUtil::UserPath::UserDir);
     s_paths.user_dir = s_active_user_dir;
     FileUtil::CreateFullPath(s_active_user_dir + "amiibo/");
+    FileUtil::CreateFullPath(s_active_user_dir + "camera/");
 
     Common::Log::Initialize();
     Common::Log::Start();
+
+    // "image" is the factory name ApplyCameraSettings writes into the camera slots.
+    Camera::RegisterFactory("image", std::make_unique<Camera::StillImage::Factory>());
 
     s_config = std::make_unique<Config>();
 
@@ -554,6 +600,32 @@ bool GetUseArticBaseController() {
 
 void SetUseArticBaseController(bool enabled) {
     Settings::values.use_artic_base_controller = enabled;
+    SaveConfig();
+}
+
+const char* CameraTargetName(CameraTarget target) {
+    switch (target) {
+    case CameraTarget::Outer:
+        return "Outer only";
+    case CameraTarget::Inner:
+        return "Inner only";
+    default:
+        return "All cameras";
+    }
+}
+
+const std::string& GetCameraImage() {
+    return s_camera_image;
+}
+
+CameraTarget GetCameraTarget() {
+    return s_camera_target;
+}
+
+void SetCameraImage(const std::string& path, CameraTarget target) {
+    s_camera_image = path;
+    s_camera_target = target;
+    ApplyCameraSettings();
     SaveConfig();
 }
 

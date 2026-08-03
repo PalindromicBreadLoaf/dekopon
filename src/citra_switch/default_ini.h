@@ -117,6 +117,13 @@ menu_rotation = 0
 # Turn the d-pad with the menu, for holding the console the same way up as the UI (0, default).
 menu_rotate_input = false
 
+[Camera]
+# PNG or JPEG the emulated cameras show, picked from the quick menu's Camera page. Anything in
+# the dekopon directory's camera/ folder is offered there. Empty leaves the cameras blank.
+image =
+# Which cameras the image feeds. 0: all (default), 1: outer only, 2: inner only.
+target = 0
+
 [Experimental]
 # Reduce the emulated CPU clock while movie playback is detected (0, default).
 movie_cpu_throttle = false

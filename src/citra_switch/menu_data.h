@@ -79,7 +79,8 @@ struct DirEntry {
     std::string path; // Absolute SD path with a trailing '/'.
 };
 
-struct AmiiboEntry {
+// One file listed by a picker that only needs a name to show and a path to hand off.
+struct FileEntry {
     std::string name;
     std::string path;
 };
@@ -114,7 +115,10 @@ bool GetInstalledVersion(std::uint64_t program_id, std::uint16_t& version);
 std::vector<CiaEntry> ListCiaFiles(const std::string& directory);
 
 // The .bin files in the amiibo directory, sorted by name.
-std::vector<AmiiboEntry> ListAmiiboFiles();
+std::vector<FileEntry> ListAmiiboFiles();
+
+// The .png/.jpg files in the camera directory, sorted by name.
+std::vector<FileEntry> ListCameraImages();
 
 // Installs `path` into the emulated NAND/SD title tree, calling `progress` with
 // (bytes_written, total_bytes) as it runs.

@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "citra_switch/camera/still_image_camera.h"
 #include "citra_switch/config.h"
 #include "citra_switch/menu_data.h"
 #include "citra_switch/overlay_menu.h"
@@ -17,6 +18,7 @@
 #include "core/cheats/cheats.h"
 #include "core/core.h"
 #include "core/hle/kernel/kernel.h"
+#include "core/hle/service/cam/cam.h"
 #include "core/hle/service/nfc/nfc.h"
 #include "core/hle/service/sm/sm.h"
 #include "core/loader/loader.h"
@@ -37,6 +39,10 @@ enum class Item {
     AmiiboFile,
     AmiibosEmpty,
     RemoveAmiibo,
+    CameraTargetRow,
+    CameraImage,
+    CameraImagesEmpty,
+    ClearCamera,
     Resume,
     ExitGame,
 };
@@ -58,11 +64,12 @@ enum class Page {
     States,
     Cheats,
     Amiibo,
+    Camera,
 };
 
-constexpr std::array<Page, NumQuickPages + 3> kPages = {
+constexpr std::array<Page, NumQuickPages + 4> kPages = {
     Page::Display, Page::Graphics, Page::Stereo, Page::Audio,  Page::Input,
-    Page::System,  Page::States,   Page::Cheats, Page::Amiibo,
+    Page::System,  Page::States,   Page::Cheats, Page::Amiibo, Page::Camera,
 };
 
 static_assert(static_cast<int>(Page::States) == NumQuickPages,
@@ -80,6 +87,8 @@ const char* PageName(Page page) {
         return "Cheats";
     case Page::Amiibo:
         return "Amiibo";
+    case Page::Camera:
+        return "Camera";
     default:
         return QuickPageName(static_cast<QuickPage>(page));
     }
@@ -93,6 +102,9 @@ constexpr int kSlotsPerPage = 8;
 
 constexpr int kAmiibosPerPage = 7;
 
+// One row is spent on the target selector and one on the clear action.
+constexpr int kCameraImagesPerPage = 6;
+
 std::atomic<bool> s_open{false};
 std::atomic<bool> s_pause_in_menu{false};
 int s_page = 0;
@@ -100,9 +112,11 @@ int s_selected = 0;
 int s_cheat_page = 0;
 int s_state_page = 0;
 int s_amiibo_page = 0;
+int s_camera_page = 0;
 std::vector<Row> s_rows;
 std::vector<SettingsRow> s_settings;
-std::vector<AmiiboEntry> s_amiibos;
+std::vector<FileEntry> s_amiibos;
+std::vector<FileEntry> s_camera_images;
 bool s_cheats_dirty = false;
 
 // Slot status strings.
@@ -176,6 +190,56 @@ void RemoveAmiibo() {
     }
     nfc->RemoveAmiibo();
     VideoCore::PostOverlayToast("Amiibo removed");
+}
+
+void RefreshCameraImages() {
+    s_camera_images = ListCameraImages();
+}
+
+int CameraPageCount() {
+    const int count = static_cast<int>(s_camera_images.size());
+    return count <= 0 ? 1 : (count + kCameraImagesPerPage - 1) / kCameraImagesPerPage;
+}
+
+// Makes a running game pick the cameras up again.
+void ReloadGuestCameras() {
+    auto& system = Core::System::GetInstance();
+    if (!system.IsPoweredOn()) {
+        return;
+    }
+    if (auto cam = Service::CAM::GetModule(system)) {
+        cam->ReloadCameraDevices();
+    }
+}
+
+void SelectCameraImage(const std::string& path) {
+    // Decoding here rather than on the capture thread means a broken file is reported to the
+    // player.
+    const std::string error = Camera::StillImage::Preload(path);
+    if (!error.empty()) {
+        VideoCore::PostOverlayToast("Cannot use that image: " + error);
+        return;
+    }
+    SetCameraImage(path, GetCameraTarget());
+    ReloadGuestCameras();
+    VideoCore::PostOverlayToast("Cameras now show this image");
+}
+
+void ClearCameraImage() {
+    if (GetCameraImage().empty()) {
+        VideoCore::PostOverlayToast("The cameras are already blank");
+        return;
+    }
+    SetCameraImage("", GetCameraTarget());
+    ReloadGuestCameras();
+    VideoCore::PostOverlayToast("Cameras cleared");
+}
+
+void StepCameraTarget(int dir) {
+    const int count = NumCameraTargets;
+    const int next = (static_cast<int>(GetCameraTarget()) + dir + count) % count;
+    SetCameraImage(GetCameraImage(), static_cast<CameraTarget>(next));
+    ReloadGuestCameras();
 }
 
 Page CurrentPage() {
@@ -278,7 +342,7 @@ void RebuildRows() {
         if (s_rows.empty()) {
             s_rows.push_back({Item::CheatsEmpty});
         }
-    } else {
+    } else if (page == Page::Amiibo) {
         s_amiibo_page = std::clamp(s_amiibo_page, 0, AmiiboPageCount() - 1);
         const int first = s_amiibo_page * kAmiibosPerPage;
         const int last = std::min(static_cast<int>(s_amiibos.size()), first + kAmiibosPerPage);
@@ -289,6 +353,19 @@ void RebuildRows() {
             s_rows.push_back({Item::AmiibosEmpty});
         }
         s_rows.push_back({Item::RemoveAmiibo});
+    } else {
+        s_rows.push_back({Item::CameraTargetRow});
+        s_camera_page = std::clamp(s_camera_page, 0, CameraPageCount() - 1);
+        const int first = s_camera_page * kCameraImagesPerPage;
+        const int last =
+            std::min(static_cast<int>(s_camera_images.size()), first + kCameraImagesPerPage);
+        for (int i = first; i < last; ++i) {
+            s_rows.push_back({Item::CameraImage, i});
+        }
+        if (s_camera_images.empty()) {
+            s_rows.push_back({Item::CameraImagesEmpty});
+        }
+        s_rows.push_back({Item::ClearCamera});
     }
     s_selected = std::clamp(s_selected, 0, static_cast<int>(s_rows.size()) - 1);
 }
@@ -298,6 +375,7 @@ bool IsAction(const Row& row) {
     switch (row.item) {
     case Item::Setting:
     case Item::Cheat:
+    case Item::CameraTargetRow:
         return false;
     default:
         return true;
@@ -320,6 +398,14 @@ std::string Label(const Row& row) {
         return "No .bin files in amiibo/";
     case Item::RemoveAmiibo:
         return "Remove active Amiibo";
+    case Item::CameraTargetRow:
+        return "Feed image to";
+    case Item::CameraImage:
+        return s_camera_images[static_cast<std::size_t>(row.index)].name;
+    case Item::CameraImagesEmpty:
+        return "No .png/.jpg files in camera/";
+    case Item::ClearCamera:
+        return "Show nothing";
     case Item::Resume:
         return "Resume Game";
     case Item::ExitGame:
@@ -338,6 +424,12 @@ std::string Value(const Row& row) {
         const std::string& status = s_slot_status[static_cast<std::size_t>(row.index)];
         return status.empty() ? "Empty" : status;
     }
+    case Item::CameraTargetRow:
+        return CameraTargetName(GetCameraTarget());
+    case Item::CameraImage:
+        return s_camera_images[static_cast<std::size_t>(row.index)].path == GetCameraImage()
+                   ? "In use"
+                   : "";
     default:
         return "";
     }
@@ -351,6 +443,9 @@ void Adjust(const Row& row, int dir) {
         break;
     case Item::Cheat:
         ToggleCheat(row.index);
+        break;
+    case Item::CameraTargetRow:
+        StepCameraTarget(dir);
         break;
     default:
         break;
@@ -398,6 +493,15 @@ void Repaint() {
         } else {
             state.hint = "A Load/Remove   L/R Page";
         }
+    } else if (CurrentPage() == Page::Camera) {
+        const int camera_pages = CameraPageCount();
+        if (camera_pages > 1) {
+            state.title +=
+                "  List " + std::to_string(s_camera_page + 1) + "/" + std::to_string(camera_pages);
+            state.hint = "A Select   L/R Page   ZL/ZR List";
+        } else {
+            state.hint = "A Select   L/R Page";
+        }
     } else {
         state.hint = "A Change   L/R Page   +/- Close";
     }
@@ -433,8 +537,10 @@ void OpenQuickMenu() {
     s_cheat_page = 0;
     s_state_page = 0;
     s_amiibo_page = 0;
+    s_camera_page = 0;
     RefreshSaveStates();
     RefreshAmiibos();
+    RefreshCameraImages();
     RebuildRows();
     s_open.store(true, std::memory_order_relaxed);
     if (IsPauseInQuickMenu()) {
@@ -485,6 +591,8 @@ QuickMenuAction UpdateQuickMenu(const QuickMenuNav& nav) {
             RefreshSaveStates();
         } else if (CurrentPage() == Page::Amiibo) {
             RefreshAmiibos();
+        } else if (CurrentPage() == Page::Camera) {
+            RefreshCameraImages();
         }
         RebuildRows();
         changed = true;
@@ -514,6 +622,15 @@ QuickMenuAction UpdateQuickMenu(const QuickMenuNav& nav) {
         const int pages = AmiiboPageCount();
         const int dir = nav.page_next ? 1 : -1;
         s_amiibo_page = (s_amiibo_page + dir + pages) % pages;
+        s_selected = 0;
+        RebuildRows();
+        changed = true;
+    }
+
+    if (CurrentPage() == Page::Camera && (nav.page_prev || nav.page_next)) {
+        const int pages = CameraPageCount();
+        const int dir = nav.page_next ? 1 : -1;
+        s_camera_page = (s_camera_page + dir + pages) % pages;
         s_selected = 0;
         RebuildRows();
         changed = true;
@@ -576,6 +693,19 @@ QuickMenuAction UpdateQuickMenu(const QuickMenuNav& nav) {
     }
     if (row.item == Item::RemoveAmiibo && nav.confirm) {
         RemoveAmiibo();
+        Repaint();
+        return QuickMenuAction::None;
+    }
+
+    if (row.item == Item::CameraImage && nav.confirm) {
+        SelectCameraImage(s_camera_images[static_cast<std::size_t>(row.index)].path);
+        RebuildRows();
+        Repaint();
+        return QuickMenuAction::None;
+    }
+    if (row.item == Item::ClearCamera && nav.confirm) {
+        ClearCameraImage();
+        RebuildRows();
         Repaint();
         return QuickMenuAction::None;
     }

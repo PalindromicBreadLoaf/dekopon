@@ -8,6 +8,10 @@ add_executable(citra_switch
     applets/swkbd.h
     applets/swkbd_horizon.cpp
     applets/swkbd_horizon.h
+    camera/image_decode.cpp
+    camera/image_decode.h
+    camera/still_image_camera.cpp
+    camera/still_image_camera.h
     citra_switch.cpp
     config.cpp
     config.h
@@ -48,6 +52,11 @@ target_include_directories(citra_switch PRIVATE ${SWITCH_FREETYPE_INCLUDE_DIR})
 # Order matters for the static newlib link: freetype -> png -> bz2 -> z.
 target_link_libraries(citra_switch PRIVATE
     ${SWITCH_FREETYPE} ${SWITCH_PNG} ${SWITCH_BZ2} ${SWITCH_ZLIB})
+
+find_path(SWITCH_JPEG_INCLUDE_DIR jpeglib.h REQUIRED)
+find_library(SWITCH_JPEG jpeg REQUIRED)
+target_include_directories(citra_switch PRIVATE ${SWITCH_JPEG_INCLUDE_DIR})
+target_link_libraries(citra_switch PRIVATE ${SWITCH_JPEG})
 
 # The GLES bring-up path pulls the switch-mesa EGL/GLES driver. It is mutually exclusive with NXVK
 # until NXVK either supports nouveau or Zink (or both).
