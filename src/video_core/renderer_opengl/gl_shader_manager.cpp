@@ -408,7 +408,8 @@ void ShaderProgramManager::UseTrivialGeometryShader() {
 
 void ShaderProgramManager::UseFragmentShader(const Pica::RegsInternal& regs,
                                              const Pica::Shader::UserConfig& user) {
-    const FSConfig fs_config{regs};
+    FSConfig fs_config{regs};
+    fs_config.Canonicalize(impl->profile);
     auto [hash, handle, result] = impl->fragment_shaders.Get(fs_config, user, impl->profile);
     impl->current.fs = handle;
     impl->current.fs_hash = hash;
@@ -535,7 +536,8 @@ void ShaderProgramManager::LoadDiskCache(const std::atomic_bool& stop_loading,
                                                              std::move(shader));
                 } else if (raw.GetProgramType() == ProgramType::FS) {
                     // TODO: Support UserConfig in disk shader cache
-                    const FSConfig conf(raw.GetRawShaderConfig());
+                    FSConfig conf(raw.GetRawShaderConfig());
+                    conf.Canonicalize(impl->profile);
                     std::scoped_lock lock(mutex);
                     impl->fragment_shaders.Inject(conf, std::move(shader));
                 } else {
@@ -647,7 +649,8 @@ void ShaderProgramManager::LoadDiskCache(const std::atomic_bool& stop_loading,
                 impl->programmable_vertex_shaders.Inject(conf, code, std::move(stage));
             } else if (raw.GetProgramType() == ProgramType::FS) {
                 // TODO: Support UserConfig in disk shader cache
-                const FSConfig fs_config{raw.GetRawShaderConfig()};
+                FSConfig fs_config{raw.GetRawShaderConfig()};
+                fs_config.Canonicalize(impl->profile);
                 code = GLSL::GenerateFragmentShader(fs_config, {}, impl->profile);
                 OGLShaderStage stage{impl->separable};
                 stage.Create(code.c_str(), GL_FRAGMENT_SHADER);

@@ -410,6 +410,12 @@ struct FSConfig {
         texture.ApplyProfile(profile);
     }
 
+    /**
+     * Applies the profile, then zeroes state the fragment shader is never generated from once the
+     * device supports the corresponding feature natively.
+     */
+    void Canonicalize(const Profile& profile);
+
     bool operator==(const FSConfig& other) const noexcept {
         return std::memcmp(this, &other, sizeof(FSConfig)) == 0;
     }
@@ -424,7 +430,9 @@ struct FSConfig {
     ProcTexConfig proctex;
 
     static consteval u64 StructHash() {
-        constexpr u64 STRUCT_VERSION = 0;
+        // 1: configs are canonicalized before hashing, so old caches are keyed by hashes the
+        // runtime no longer computes.
+        constexpr u64 STRUCT_VERSION = 1;
 
         using T = FSConfig;
         return Common::HashCombine(STRUCT_VERSION,

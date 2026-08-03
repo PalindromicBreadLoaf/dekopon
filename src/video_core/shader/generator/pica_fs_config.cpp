@@ -6,6 +6,74 @@
 
 namespace Pica::Shader {
 
+namespace {
+using TevOperation = Pica::TexturingRegs::TevStageConfig::Operation;
+
+constexpr bool TevOpUsesSource2(TevOperation op) {
+    return op != TevOperation::Replace;
+}
+
+constexpr bool TevOpUsesSource3(TevOperation op) {
+    return op == TevOperation::Lerp || op == TevOperation::MultiplyThenAdd ||
+           op == TevOperation::AddThenMultiply;
+}
+
+/// Zeroes the source/modifier fields this stage's ops can never read, so that stages that generate
+/// equivalent code stop hashing to distinct FSConfigs.
+void CanonicalizeTevStage(TevStageConfigRaw& stage, std::size_t index) {
+    const auto color_op = static_cast<TevOperation>(stage.ops_raw & 0xF);
+    const auto alpha_op = static_cast<TevOperation>((stage.ops_raw >> 16) & 0xF);
+
+    // Stage 0 has no previous stage, so both FS generators substitute source3 wherever a source
+    // reads Previous.
+    const bool source3_is_dead = index != 0;
+
+    if (!TevOpUsesSource2(color_op)) {
+        stage.sources_raw &= ~(0xFu << 4);   // color_source2
+        stage.modifiers_raw &= ~(0xFu << 4); // color_modifier2
+    }
+    if (!TevOpUsesSource3(color_op) && source3_is_dead) {
+        stage.sources_raw &= ~(0xFu << 8);   // color_source3
+        stage.modifiers_raw &= ~(0xFu << 8); // color_modifier3
+    }
+
+    if (color_op == TevOperation::Dot3_RGBA) {
+        stage.sources_raw &= 0xFFF;
+        stage.modifiers_raw &= 0xFFF;
+        stage.ops_raw &= 0xF;
+        return;
+    }
+
+    if (!TevOpUsesSource2(alpha_op)) {
+        stage.sources_raw &= ~(0xFu << 20);   // alpha_source2
+        stage.modifiers_raw &= ~(0x7u << 16); // alpha_modifier2
+    }
+    if (!TevOpUsesSource3(alpha_op) && source3_is_dead) {
+        stage.sources_raw &= ~(0xFu << 24);   // alpha_source3
+        stage.modifiers_raw &= ~(0x7u << 20); // alpha_modifier3
+    }
+}
+} // Anonymous namespace
+
+void FSConfig::Canonicalize(const Profile& profile) {
+    ApplyProfile(profile);
+
+    // The fields below only exist to drive ApplyProfile's emulation of features the device may
+    // lack.
+    if (profile.has_logic_op) {
+        framebuffer.requested_logic_op = {};
+    }
+    if (profile.is_vulkan || profile.has_blend_minmax_factor) {
+        framebuffer.requested_rgb_blend = {};
+        framebuffer.requested_alpha_blend = {};
+    }
+    if (profile.has_custom_border_color) {
+        for (auto& wrap : texture.requested_wrap) {
+            wrap = {};
+        }
+    }
+}
+
 FramebufferConfig::FramebufferConfig(const Pica::RegsInternal& regs) {
     const auto& output_merger = regs.framebuffer.output_merger;
     scissor_test_mode.Assign(regs.rasterizer.scissor_test.mode);
@@ -69,11 +137,7 @@ TextureConfig::TextureConfig(const Pica::TexturingRegs& regs) {
         tev_stages[i].modifiers_raw = tev_stage.modifiers_raw;
         tev_stages[i].ops_raw = tev_stage.ops_raw;
         tev_stages[i].scales_raw = tev_stage.scales_raw;
-        if (tev_stage.color_op == Pica::TexturingRegs::TevStageConfig::Operation::Dot3_RGBA) {
-            tev_stages[i].sources_raw &= 0xFFF;
-            tev_stages[i].modifiers_raw &= 0xFFF;
-            tev_stages[i].ops_raw &= 0xF;
-        }
+        CanonicalizeTevStage(tev_stages[i], i);
     }
 }
 
