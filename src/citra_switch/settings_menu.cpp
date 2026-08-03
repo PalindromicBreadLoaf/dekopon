@@ -867,6 +867,16 @@ SettingsRow LayoutCycleRow() {
             SettingsModal::LayoutCycle};
 }
 
+SettingsRow UpdateChannelRow() {
+    return {
+        "Update Channel",
+        [] { return std::string{GetUpdateChannel() == UpdateChannel::Stable ? "Stable" : "Prerelease"}; },
+        [](int) {
+            SetUpdateChannel(GetUpdateChannel() == UpdateChannel::Stable ? UpdateChannel::Prerelease
+                                                                         : UpdateChannel::Stable);
+        }};
+}
+
 } // namespace
 
 const char* SettingsPageName(SettingsPage page) {
@@ -908,6 +918,11 @@ std::vector<SettingsRow> BuildSettingsPage(SettingsPage page) {
             Toggle("Show FPS Counter", v.show_fps),
             Toggle("Shader Compile Notice", v.show_shader_compile_notice),
             PauseInQuickMenuRow(),
+            UpdateChannelRow(),
+            {"Check for Updates",
+             [] { return std::string{CurrentVersion()}; },
+             {},
+             SettingsModal::CheckForUpdates},
             {"Reset All Settings",
              [] { return std::string{"Choose"}; },
              {},

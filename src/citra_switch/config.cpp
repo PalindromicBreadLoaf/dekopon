@@ -68,6 +68,8 @@ std::string s_camera_image;
 SwitchFrontend::CameraTarget s_camera_target = SwitchFrontend::CameraTarget::All;
 int s_menu_rotation = 0;
 bool s_menu_input_rotated = false;
+SwitchFrontend::UpdateChannel s_update_channel = SwitchFrontend::UpdateChannel::Stable;
+std::string s_dismissed_update_tag;
 
 // Pushes the picked image onto the three camera slots the CAM service reads.
 void ApplyCameraSettings() {
@@ -365,6 +367,10 @@ private:
             static_cast<int>(config->GetInteger("Switch", "menu_rotation", 0)));
         SwitchFrontend::SetMenuInputRotated(
             config->GetBoolean("Switch", "menu_rotate_input", false));
+        s_update_channel = static_cast<SwitchFrontend::UpdateChannel>(std::clamp<long>(
+            config->GetInteger("Switch", "update_channel", 0), 0, 1));
+        s_dismissed_update_tag =
+            Common::StripSpaces(config->Get("Switch", "dismissed_update", ""));
 
         SwitchFrontend::SetMovieThrottleEnabled(
             config->GetBoolean("Experimental", "movie_cpu_throttle", false));
@@ -422,6 +428,8 @@ private:
         ss << "menu_rotation = " << SwitchFrontend::GetMenuRotation() << '\n';
         ss << "menu_rotate_input = " << (SwitchFrontend::IsMenuInputRotated() ? "true" : "false")
            << '\n';
+        ss << "update_channel = " << static_cast<int>(s_update_channel) << '\n';
+        ss << "dismissed_update = " << s_dismissed_update_tag << '\n';
         ss << "launch_count = " << launch_count << "\n\n";
 
         ss << "[Camera]\n";
@@ -581,6 +589,23 @@ bool IsMenuInputRotated() {
 
 void SetMenuInputRotated(bool enabled) {
     s_menu_input_rotated = enabled;
+}
+
+UpdateChannel GetUpdateChannel() {
+    return s_update_channel;
+}
+
+void SetUpdateChannel(UpdateChannel channel) {
+    s_update_channel = channel;
+}
+
+const std::string& GetDismissedUpdateTag() {
+    return s_dismissed_update_tag;
+}
+
+void DismissUpdateTag(const std::string& tag) {
+    s_dismissed_update_tag = tag;
+    SaveConfig();
 }
 
 MenuDirections RotateMenuDirections(MenuDirections pressed) {

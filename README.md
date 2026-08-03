@@ -34,9 +34,12 @@ Other features include:
 - Full 3D support via Nintendo Labo VR Kit/Virtual Boy for Nintendo Switch
 - (Virtual) Cartridge insertion support
 - Resolution Upscaling
+- Amiibo support via .bin amiibo images placed in `amiibo`
+- Camera support via static images placed in `camera`
 
 Features currently in the pipeline are:
 - More performance improvements
+- Streetpass/spotpass (If even possible)
 
 Feel free to request more features, but do note they may or may not be implemented due to either feasibility or time.
 
@@ -92,15 +95,16 @@ The current build requires DevkitPro. Please install from here [DevkitPro Instal
 - switch-bzip2
 - switch-libpng
 - switch-zlib
+- switch-curl
 - switch-mesa *(only for the legacy GLES backend\*)*
 ### System Packages
 - cmake
 - git
 
 \*The default GPU backend is Vulkan via [NXVK](https://github.com/PalindromicBreadLoaf/nxvk)
-NXVK and switch-mesa cannot be included simultaneously, so renderer must be chosen at build time.
-Vulkan is highly recommended and I have yet to encounter an issues regarding it.
-Hopefully in the future NXVK will also include OpenGL drivers of some sort to resolve this issue.
+NXVK and switch-mesa cannot be included simultaneously, so the driver must be chosen at buildtime.
+NXVK is default since it supports both GL and Vulkan, however, it is possible to swap back to 
+switch-mesa if so desired.
 
 ## 1. Clone the repository
 ```shell

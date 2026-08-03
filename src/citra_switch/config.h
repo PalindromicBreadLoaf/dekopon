@@ -7,6 +7,8 @@
 #include <cstdint>
 #include <string>
 
+#include "citra_switch/updater.h"
+
 // Facade between the <switch.h> main() and the Azahar core.
 namespace SwitchFrontend {
 
@@ -76,6 +78,12 @@ void SetMenuRotation(int degrees);
 // Whether the d-pad turns with the menu.
 bool IsMenuInputRotated();
 void SetMenuInputRotated(bool enabled);
+
+// GitHub updater preferences.
+UpdateChannel GetUpdateChannel();
+void SetUpdateChannel(UpdateChannel channel);
+const std::string& GetDismissedUpdateTag();
+void DismissUpdateTag(const std::string& tag);
 
 struct MenuDirections {
     bool up{};

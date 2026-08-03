@@ -9,6 +9,7 @@
 #include <switch.h>
 
 #include "citra_switch/applets/swkbd.h"
+#include "citra_switch/updater.h"
 #include "citra_switch/config.h"
 #include "citra_switch/input.h"
 #include "citra_switch/menu.h"
@@ -248,6 +249,7 @@ void RunGame(PadState& pad, const std::string& rom) {
 } // namespace
 
 int main(int argc, char* argv[]) {
+    SwitchFrontend::SetUpdaterExecutablePath(argc > 0 && argv[0] != nullptr ? argv[0] : "");
     const bool have_socket = R_SUCCEEDED(socketInitializeDefault());
     if (have_socket) {
         nxlinkStdio();

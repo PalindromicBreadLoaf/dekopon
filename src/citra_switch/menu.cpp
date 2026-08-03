@@ -29,6 +29,7 @@
 #include "citra_switch/menu_data.h"
 #include "citra_switch/rail_icons.h"
 #include "citra_switch/settings_menu.h"
+#include "citra_switch/updater.h"
 #include "citra_switch/usb_storage.h"
 #include "common/horizon_boost.h"
 
@@ -483,6 +484,7 @@ constexpr int kIconSize = 96;
 std::string g_notice;
 int g_notice_frames = 0;
 bool g_notice_is_error = true;
+bool g_auto_update_checked = false;
 
 // ~4 seconds at 60fps.
 constexpr int kNoticeFrames = 240;
@@ -1010,19 +1012,25 @@ public:
         DrawLoading();
         Present();
         Rescan();
+        if (!g_auto_update_checked) {
+            g_auto_update_checked = true;
+            BeginUpdateCheck(false);
+        }
         while (appletMainLoop()) {
             padUpdate(&pad);
             ApplyRotation();
             const u64 down = padGetButtonsDown(&pad);
             held = padGetButtons(&pad);
+            PumpUpdater();
 
             if (!install_active && ConsumeUsbStorageChange()) {
                 HandleUsbStorageChange();
             }
 
             // +/- together exits the app, but will not allow during an install.
-            if (!install_active && (held & (HidNpadButton_Plus | HidNpadButton_Minus)) ==
-                                       (HidNpadButton_Plus | HidNpadButton_Minus)) {
+            if (!install_active && !update_download_active &&
+                (held & (HidNpadButton_Plus | HidNpadButton_Minus)) ==
+                    (HidNpadButton_Plus | HidNpadButton_Minus)) {
                 if (remap_open) {
                     CloseRemap();
                 }
@@ -1054,7 +1062,16 @@ public:
 
             MenuResult result;
             bool done = false;
-            if (install_active) {
+            if (update_installed) {
+                if (down & (HidNpadButton_A | HidNpadButton_B | HidNpadButton_Plus |
+                            HidNpadButton_Minus)) {
+                    QueueUpdatedRelaunch();
+                    Flush();
+                    return {MenuAction::Exit, {}};
+                }
+            } else if (update_download_active || (update_check_active && update_check_manual)) {
+                // The worker is pumped above and its modal is drawn below.
+            } else if (install_active) {
                 PumpInstall();
             } else if (confirm) {
                 HandleConfirm(down);
@@ -1091,8 +1108,10 @@ public:
                 return result;
             }
 
-            if (!install_active && !details_open && !layout_picker_open && !remap_open &&
-                !preset_picker_open && !country_picker_open && !confirm) {
+            if (!install_active && !update_download_active && !update_installed &&
+                !(update_check_active && update_check_manual) && !details_open &&
+                !layout_picker_open && !remap_open && !preset_picker_open &&
+                !country_picker_open && !confirm) {
                 HandleTouch();
             }
             if (pending_launch) {
@@ -1119,6 +1138,10 @@ public:
         // Only reachable with a worker still running if appletMainLoop() bowed out mid-install.
         if (install_thread.joinable()) {
             install_thread.join();
+        }
+        updater_cancel = true;
+        if (updater_thread.joinable()) {
+            updater_thread.join();
         }
         if (fb_ready) {
             framebufferClose(&fb);
@@ -1185,6 +1208,7 @@ private:
         std::string note;
         const char* accept;
         std::function<void()> on_accept;
+        std::function<void()> on_cancel;
     };
     std::optional<ConfirmPrompt> confirm;
 
@@ -1204,6 +1228,22 @@ private:
     InstallResult install_result{};
     std::string install_name;
     bool install_active = false;
+
+    // GitHub update checker/downloader. Only one updater worker is active at a time.
+    std::thread updater_thread;
+    std::atomic<bool> updater_done{false};
+    // The silent startup check does not block launching a game, so the menu can be torn down with
+    // it still in flight. Without this the join below would wait out the GitHub request timeouts.
+    std::atomic<bool> updater_cancel{false};
+    bool update_check_active = false;
+    bool update_check_manual = false;
+    bool update_download_active = false;
+    bool update_installed = false;
+    std::atomic<std::uint64_t> update_downloaded{0};
+    std::atomic<std::uint64_t> update_total{0};
+    UpdateCheckResult update_check_result{};
+    UpdateInstallResult update_install_result{};
+    UpdateRelease update_release{};
 
     void Rescan() {
         games = ScanGames();
@@ -1566,6 +1606,9 @@ private:
         case SettingsModal::ClearShaderCache:
             OpenShaderCacheConfirm();
             break;
+        case SettingsModal::CheckForUpdates:
+            BeginUpdateCheck(true);
+            break;
         case SettingsModal::Username:
             if (const auto text = PromptSettingText("Username", "Name shown to other consoles",
                                                     GetProfileUsername(), 10)) {
@@ -1857,8 +1900,135 @@ private:
             return;
         }
         if (down & HidNpadButton_B) {
+            const std::function<void()> cancel = std::move(confirm->on_cancel);
             confirm.reset();
+            if (cancel) {
+                cancel();
+            }
         }
+    }
+
+    void BeginUpdateCheck(bool manual) {
+        if (update_check_active || update_download_active) {
+            if (manual) {
+                ShowNotice("An update operation is already running", false);
+            }
+            return;
+        }
+        if (updater_thread.joinable()) {
+            updater_thread.join();
+        }
+        update_check_active = true;
+        update_check_manual = manual;
+        updater_done = false;
+        updater_cancel = false;
+        const UpdateChannel channel = GetUpdateChannel();
+        updater_thread = std::thread([this, channel] {
+            update_check_result = CheckForUpdate(channel, &updater_cancel);
+            updater_done = true;
+        });
+    }
+
+    void PumpUpdater() {
+        if (!updater_done) {
+            return;
+        }
+        updater_done = false;
+        if (updater_thread.joinable()) {
+            updater_thread.join();
+        }
+
+        if (update_check_active) {
+            update_check_active = false;
+            const bool manual = update_check_manual;
+            update_check_manual = false;
+            if (update_check_result.status == UpdateCheckStatus::Error) {
+                if (manual) {
+                    OpenUpdateError(update_check_result.error);
+                }
+                return;
+            }
+            if (update_check_result.status == UpdateCheckStatus::UpToDate) {
+                if (manual) {
+                    ShowNotice("Dekopon " + std::string{CurrentVersion()} + " is up to date",
+                               false);
+                }
+                return;
+            }
+            if (!manual && update_check_result.release.tag == GetDismissedUpdateTag()) {
+                return;
+            }
+            OpenUpdateConfirm(update_check_result.release);
+            return;
+        }
+
+        if (update_download_active) {
+            update_download_active = false;
+            if (update_install_result.success) {
+                DismissUpdateTag("");
+                update_installed = true;
+            } else {
+                OpenUpdateError(update_install_result.error);
+            }
+        }
+    }
+
+    void OpenUpdateConfirm(const UpdateRelease& release) {
+        update_release = release;
+        const std::string kind = release.prerelease ? "prerelease" : "stable release";
+        confirm = ConfirmPrompt{
+            "Update Dekopon to " + release.tag + '?',
+            {"Installed: " + std::string{CurrentVersion()},
+             "Available: " + release.tag + " (" + kind + ")",
+             "The running dekopon.nro will be replaced after verification."},
+            "The current NRO is retained as a .backup file.",
+            "Update",
+            [this, release] { StartUpdate(release); },
+            [tag = release.tag] { DismissUpdateTag(tag); }};
+    }
+
+    void StartUpdate(const UpdateRelease& release) {
+        if (updater_thread.joinable()) {
+            updater_thread.join();
+        }
+        update_release = release;
+        update_downloaded = 0;
+        update_total = release.size;
+        updater_done = false;
+        update_download_active = true;
+        updater_thread = std::thread([this, release] {
+            update_install_result = InstallUpdate(
+                release, GetUpdaterExecutablePath(), [this](std::uint64_t downloaded,
+                                                            std::uint64_t total) {
+                    update_downloaded = downloaded;
+                    if (total != 0) {
+                        update_total = total;
+                    }
+                });
+            updater_done = true;
+        });
+    }
+
+    // Chainloads the NRO that was just installed.
+    void QueueUpdatedRelaunch() {
+        const std::string& path = GetUpdaterExecutablePath();
+        if (path.empty() || !envHasNextLoad()) {
+            return;
+        }
+        envSetNextLoad(path.c_str(), path.c_str());
+    }
+
+    void OpenUpdateError(const std::string& error) {
+        std::vector<std::string> lines;
+        constexpr std::size_t line_length = 66;
+        for (std::size_t pos = 0; pos < error.size(); pos += line_length) {
+            lines.push_back(error.substr(pos, line_length));
+        }
+        if (lines.empty()) {
+            lines.emplace_back("The update operation failed for an unknown reason.");
+        }
+        confirm = ConfirmPrompt{"Update failed", std::move(lines),
+                                "The installed NRO was not changed.", "Close", [] {}};
     }
 
     void OpenRemap() {
@@ -2564,6 +2734,15 @@ private:
         if (install_active) {
             DrawInstallProgress(c);
         }
+        if (update_check_active && update_check_manual) {
+            DrawUpdateCheckProgress(c);
+        }
+        if (update_download_active) {
+            DrawUpdateProgress(c);
+        }
+        if (update_installed) {
+            DrawUpdateInstalled(c);
+        }
     }
 
     void DrawInstallPage(Canvas& c) {
@@ -2709,6 +2888,66 @@ private:
                     kColTextDim);
         const char* warn = "Don't close Dekopon or turn off the console";
         g_font.Draw(c, x + w - 24 - g_font.Measure(warn, 18), bar_y + 36, warn, 18, kColTextDim);
+    }
+
+    void DrawUpdateCheckProgress(Canvas& c) {
+        const int w = std::min(560, g_screen_w - 48);
+        constexpr int h = 112;
+        const int x = (g_screen_w - w) / 2;
+        const int y = (g_screen_h - h) / 2;
+        c.FillRect(0, 0, g_screen_w, g_screen_h, MakeColor(0x10, 0x11, 0x13, 0xC0));
+        c.RoundBorder(x, y, w, h, 14, 2, kColBadge, kColSurface);
+        g_font.Draw(c, x + 24, y + 46, "Checking GitHub for updates...", 22, kColText);
+        g_font.Draw(c, x + 24, y + 80, "This normally takes only a few seconds.", 18,
+                    kColTextDim);
+    }
+
+    void DrawUpdateProgress(Canvas& c) {
+        const std::uint64_t downloaded = update_downloaded.load();
+        const std::uint64_t total = update_total.load();
+        const int w = std::min(600, g_screen_w - 48);
+        constexpr int h = 150;
+        const int x = (g_screen_w - w) / 2;
+        const int y = (g_screen_h - h) / 2;
+        c.FillRect(0, 0, g_screen_w, g_screen_h, MakeColor(0x10, 0x11, 0x13, 0xC0));
+        c.RoundBorder(x, y, w, h, 14, 2, kColBadge, kColSurface);
+        g_font.Draw(c, x + 24, y + 42,
+                    g_font.Truncate("Downloading Dekopon " + update_release.tag, 20, w - 48), 20,
+                    kColText);
+
+        const int bar_x = x + 24;
+        const int bar_y = y + 66;
+        const int bar_w = w - 48;
+        c.FillRoundRect(bar_x, bar_y, bar_w, 10, 5, kColRail);
+        const int fill = total == 0
+                             ? 0
+                             : static_cast<int>(static_cast<std::uint64_t>(bar_w) * downloaded /
+                                                total);
+        c.FillRoundRect(bar_x, bar_y, std::clamp(fill, 0, bar_w), 10, 5, kColAccent);
+        g_font.Draw(c, bar_x, bar_y + 38,
+                    FormatSize(static_cast<std::size_t>(downloaded)) + " / " +
+                        FormatSize(static_cast<std::size_t>(total)),
+                    18, kColTextDim);
+        g_font.Draw(c, bar_x, bar_y + 66, "Verifying before updating", 16,
+                    kColTextDim);
+    }
+
+    void DrawUpdateInstalled(Canvas& c) {
+        const int w = std::min(640, g_screen_w - 48);
+        constexpr int h = 218;
+        const int x = (g_screen_w - w) / 2;
+        const int y = (g_screen_h - h) / 2;
+        c.FillRect(0, 0, g_screen_w, g_screen_h, MakeColor(0x10, 0x11, 0x13, 0xC0));
+        c.RoundBorder(x, y, w, h, 14, 2, kColBadge, kColSurface);
+        g_font.Draw(c, x + 24, y + 46, "Update installed", 24, kColText);
+        g_font.Draw(c, x + 24, y + 84, "Dekopon " + update_release.tag + " is ready.", 19,
+                    kColAccent);
+        g_font.Draw(c, x + 24, y + 116,
+                    "The previous NRO remains beside it with a .backup suffix.", 17,
+                    kColTextDim);
+        g_font.Draw(c, x + 24, y + 144, "Dekopon will close and reopen on the new version.", 17,
+                    kColTextDim);
+        DrawHint(c, x + 24, y + h - 42, "A", "Restart");
     }
 
     void DrawLibrary(Canvas& c) {

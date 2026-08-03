@@ -125,6 +125,10 @@ pause_in_quick_menu = false
 menu_rotation = 0
 # Turn the d-pad with the menu, for holding the console the same way up as the UI (0, default).
 menu_rotate_input = false
+# Which GitHub releases the updater follows. 0: stable releases, 1: include prereleases.
+update_channel = 0
+# Release tag declined at the automatic startup prompt. Manual checks ignore this value.
+dismissed_update =
 
 [Camera]
 # PNG or JPEG the emulated cameras show.. Anything in the camera/ folder is offered.

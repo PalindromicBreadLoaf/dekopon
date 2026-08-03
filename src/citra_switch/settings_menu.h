@@ -36,6 +36,7 @@ enum class SettingsModal {
     LogFilter,
     ResetDefaults,
     ClearShaderCache,
+    CheckForUpdates,
     Username,
     Country,
     FixedClock,

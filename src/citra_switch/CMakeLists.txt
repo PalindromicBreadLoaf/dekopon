@@ -37,6 +37,8 @@ add_executable(citra_switch
     rail_icons.h
     settings_menu.cpp
     settings_menu.h
+    updater.cpp
+    updater.h
     usb_storage.cpp
     usb_storage.h
 )
@@ -50,10 +52,15 @@ find_library(SWITCH_FREETYPE freetype REQUIRED)
 find_library(SWITCH_PNG png REQUIRED)
 find_library(SWITCH_BZ2 bz2 REQUIRED)
 find_library(SWITCH_ZLIB z REQUIRED)
+find_path(SWITCH_CURL_INCLUDE_DIR curl/curl.h REQUIRED)
+find_library(SWITCH_CURL curl REQUIRED)
 target_include_directories(citra_switch PRIVATE ${SWITCH_FREETYPE_INCLUDE_DIR})
+target_include_directories(citra_switch PRIVATE ${SWITCH_CURL_INCLUDE_DIR})
+target_compile_definitions(citra_switch PRIVATE CURL_STATICLIB DEKOPON_VERSION="${DEKOPON_VERSION}")
 # Order matters for the static newlib link: freetype -> png -> bz2 -> z.
 target_link_libraries(citra_switch PRIVATE
-    ${SWITCH_FREETYPE} ${SWITCH_PNG} ${SWITCH_BZ2} ${SWITCH_ZLIB})
+    ${SWITCH_FREETYPE} ${SWITCH_PNG} ${SWITCH_BZ2} ${SWITCH_ZLIB}
+    ${SWITCH_CURL} ${SWITCH_ZLIB} json-headers cryptopp)
 
 find_path(SWITCH_JPEG_INCLUDE_DIR jpeglib.h REQUIRED)
 find_library(SWITCH_JPEG jpeg REQUIRED)
@@ -86,7 +93,7 @@ endif()
 nx_generate_nacp(OUTPUT dekopon.nacp
     NAME "Dekopon"
     AUTHOR "Azahar Team \& PalindromicBreadLoaf"
-    VERSION "2.1.0-RC1"
+    VERSION "${DEKOPON_VERSION}"
 )
 
 # Compile deko3d shaders with uam and pack them into the romfs.
