@@ -7,6 +7,7 @@
 #include <atomic>
 #include <chrono>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -341,6 +342,9 @@ public:
     std::unique_ptr<PerfStats> perf_stats;
     FrameLimiter frame_limiter;
 
+    /// Periodically writes a frame timing summary to the log.
+    void LogPerfStats(const PerfStats::Results& results);
+
     void SetStatus(ResultStatus new_status, const char* details = nullptr) {
         status = new_status;
         if (details) {
@@ -595,6 +599,16 @@ private:
     std::mutex save_state_event_mutex;
     std::optional<SaveStateEvent> save_state_event;
     void PostSaveStateEvent(bool loading, u32 slot, bool success, std::string message);
+
+    /// Worst sample seen since the last perf log line.
+    struct PerfLogState {
+        std::chrono::steady_clock::time_point last_log{};
+        double min_game_fps = std::numeric_limits<double>::max();
+        double min_emulation_speed = std::numeric_limits<double>::max();
+        double max_frametime = 0.0;
+        u32 samples = 0;
+    };
+    PerfLogState perf_log_state;
 
     ResultStatus status = ResultStatus::Success;
     std::string status_details = "";

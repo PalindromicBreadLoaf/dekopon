@@ -2,6 +2,8 @@
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
 
+#include <algorithm>
+#include <chrono>
 #include <stdexcept>
 #include <utility>
 #include <boost/serialization/array.hpp>
@@ -485,6 +487,7 @@ System::ResultStatus System::Load(Frontend::EmuWindow& emu_window, const std::st
     cheat_engine.Connect(process->process_id);
 
     perf_stats = std::make_unique<PerfStats>(title_id);
+    perf_log_state = PerfLogState{};
 
     custom_tex_manager->SetTitleId(title_id);
     if (Settings::values.dump_textures) {
@@ -541,8 +544,44 @@ void System::FlushDeferredCacheInvalidations() {
 }
 
 PerfStats::Results System::GetAndResetPerfStats() {
-    return (perf_stats && timing) ? perf_stats->GetAndResetStats(timing->GetGlobalTimeUs())
-                                  : PerfStats::Results{};
+    if (!perf_stats || !timing) {
+        return PerfStats::Results{};
+    }
+    const auto results = perf_stats->GetAndResetStats(timing->GetGlobalTimeUs());
+    LogPerfStats(results);
+    return results;
+}
+
+void System::LogPerfStats(const PerfStats::Results& results) {
+    static constexpr auto PERF_LOG_INTERVAL = std::chrono::seconds{10};
+
+    auto& state = perf_log_state;
+    const auto now = std::chrono::steady_clock::now();
+    if (state.last_log.time_since_epoch().count() == 0) {
+        state = PerfLogState{.last_log = now};
+        return;
+    }
+
+    // Each call covers only the window since the previous one, so the samples are folded together.
+    state.min_game_fps = std::min(state.min_game_fps, results.game_fps);
+    state.min_emulation_speed = std::min(state.min_emulation_speed, results.emulation_speed);
+    state.max_frametime = std::max(state.max_frametime, results.time_vblank_interval);
+    ++state.samples;
+
+    if (now - state.last_log < PERF_LOG_INTERVAL) {
+        return;
+    }
+
+    static constexpr double MS = 1000.0;
+    LOG_INFO(Core,
+             "Perf: {:.1f} fps (min {:.1f}), speed {:.0f}% (min {:.0f}%), frame {:.1f} ms "
+             "(max {:.1f}) [svc {:.1f}, ipc {:.1f}, gpu {:.1f}, swap {:.1f}, other {:.1f}]",
+             results.game_fps, state.min_game_fps, results.emulation_speed * 100.0,
+             state.min_emulation_speed * 100.0, results.time_vblank_interval * MS,
+             state.max_frametime * MS, results.time_hle_svc * MS, results.time_hle_ipc * MS,
+             results.time_gpu * MS, results.time_swap * MS, results.time_remaining * MS);
+
+    state = PerfLogState{.last_log = now};
 }
 
 PerfStats::Results System::GetLastPerfStats() {

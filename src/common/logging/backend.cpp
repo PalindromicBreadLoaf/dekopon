@@ -2,8 +2,11 @@
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
 
+#include <array>
 #include <atomic>
 #include <chrono>
+#include <mutex>
+#include <utility>
 #include <boost/algorithm/string/replace.hpp>
 #include <boost/regex.hpp>
 
@@ -217,6 +220,61 @@ private:
 };
 
 /**
+ * Collapses a call site that logs the same line every frame down to a trickle.
+ */
+class RepeatFilter {
+public:
+    struct Decision {
+        bool log;
+        u64 suppressed;
+    };
+
+    Decision Check(const char* filename, unsigned int line_num) {
+        const auto now = std::chrono::steady_clock::now();
+        Slot& slot = slots[SlotIndex(filename, line_num)];
+
+        std::scoped_lock lock{mutex};
+        if (slot.filename != filename || slot.line_num != line_num) {
+            slot = Slot{.filename = filename, .line_num = line_num, .window_start = now,
+                        .in_window = 1};
+            return {true, 0};
+        }
+        if (now - slot.window_start >= WINDOW) {
+            slot.window_start = now;
+            slot.in_window = 1;
+        } else if (slot.in_window < BURST) {
+            ++slot.in_window;
+        } else {
+            ++slot.suppressed;
+            return {false, 0};
+        }
+        return {true, std::exchange(slot.suppressed, u64{0})};
+    }
+
+private:
+    // A call site logs at most BURST times per WINDOW.
+    static constexpr auto WINDOW = std::chrono::seconds{5};
+    static constexpr u32 BURST = 4;
+    static constexpr std::size_t SLOTS = 1024;
+
+    struct Slot {
+        const char* filename = nullptr;
+        unsigned int line_num = 0;
+        std::chrono::steady_clock::time_point window_start{};
+        u32 in_window = 0;
+        u64 suppressed = 0;
+    };
+
+    static std::size_t SlotIndex(const char* filename, unsigned int line_num) {
+        const auto bits = reinterpret_cast<std::uintptr_t>(filename) / alignof(char*) + line_num * 31;
+        return static_cast<std::size_t>(bits) % SLOTS;
+    }
+
+    std::mutex mutex;
+    std::array<Slot, SLOTS> slots{};
+};
+
+/**
  * Backend that writes to Visual Studio's output window
  */
 class DebuggerBackend final : public Backend {
@@ -363,7 +421,16 @@ public:
                 backend.Write(new_entry);
                 backend.Flush();
             });
-        } else if (!message_queue.TryEmplace(std::move(new_entry))) {
+            return;
+        }
+        const auto repeat = repeat_filter.Check(filename, line_num);
+        if (!repeat.log) {
+            return;
+        }
+        if (repeat.suppressed != 0) {
+            new_entry.message += fmt::format(" (+{} suppressed)", repeat.suppressed);
+        }
+        if (!message_queue.TryEmplace(std::move(new_entry))) {
             // Waiting for room makes the emulator wait constantly on logging.
             dropped_entries.fetch_add(1, std::memory_order_relaxed);
         }
@@ -569,6 +636,7 @@ private:
 #endif
 
     MPSCQueue<Entry> message_queue{};
+    RepeatFilter repeat_filter{};
     std::atomic<u64> dropped_entries{};
     std::chrono::steady_clock::time_point time_origin{std::chrono::steady_clock::now()};
     std::jthread backend_thread;
