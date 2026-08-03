@@ -122,6 +122,11 @@ struct BlendingState {
         BitField<19, 3, Pica::FramebufferRegs::BlendEquation> alpha_blend_eq;
     };
 
+    bool operator==(const BlendingState& other) const noexcept {
+        return blend_enable == other.blend_enable && color_write_mask == other.color_write_mask &&
+               logic_op == other.logic_op && value == other.value;
+    }
+
     static consteval u64 StructHash() {
         constexpr u64 STRUCT_VERSION = 0;
 

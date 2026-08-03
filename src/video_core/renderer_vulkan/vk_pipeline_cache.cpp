@@ -453,7 +453,11 @@ bool PipelineCache::BindPipeline(PipelineInfo& info, bool wait_built) {
                       current_rasterization = current_info.state.rasterization,
                       current_depth_stencil = current_info.state.depth_stencil,
                       rasterization = info.state.rasterization,
-                      depth_stencil = info.state.depth_stencil](vk::CommandBuffer cmdbuf) {
+                      depth_stencil = info.state.depth_stencil,
+                      current_blending = current_info.state.blending,
+                      blending = info.state.blending,
+                      color_write_mask = info.GetFinalColorWriteMask(instance)](
+                         vk::CommandBuffer cmdbuf) {
         if (dynamic.viewport != current_dynamic.viewport || is_dirty) {
             const vk::Viewport vk_viewport = {
                 .x = static_cast<f32>(dynamic.viewport.left),
@@ -545,6 +549,27 @@ bool PipelineCache::BindPipeline(PipelineInfo& info, bool wait_built) {
                                        PicaToVK::StencilOp(depth_stencil.stencil_pass_op),
                                        PicaToVK::StencilOp(depth_stencil.stencil_depth_fail_op),
                                        PicaToVK::CompareFunc(depth_stencil.stencil_compare_op));
+            }
+        }
+
+        if (instance.IsDynamicBlendSupported() && (!(blending == current_blending) || is_dirty)) {
+            const vk::Bool32 blend_enable = blending.blend_enable != 0;
+            const vk::ColorBlendEquationEXT equation = {
+                .srcColorBlendFactor = PicaToVK::BlendFunc(blending.src_color_blend_factor),
+                .dstColorBlendFactor = PicaToVK::BlendFunc(blending.dst_color_blend_factor),
+                .colorBlendOp = PicaToVK::BlendEquation(blending.color_blend_eq),
+                .srcAlphaBlendFactor = PicaToVK::BlendFunc(blending.src_alpha_blend_factor),
+                .dstAlphaBlendFactor = PicaToVK::BlendFunc(blending.dst_alpha_blend_factor),
+                .alphaBlendOp = PicaToVK::BlendEquation(blending.alpha_blend_eq),
+            };
+
+            cmdbuf.setColorBlendEnableEXT(0, blend_enable);
+            cmdbuf.setColorBlendEquationEXT(0, equation);
+            cmdbuf.setColorWriteMaskEXT(0, static_cast<vk::ColorComponentFlags>(color_write_mask));
+
+            if (instance.IsDynamicLogicOpSupported()) {
+                cmdbuf.setLogicOpEnableEXT(!blend_enable);
+                cmdbuf.setLogicOpEXT(PicaToVK::LogicOp(blending.logic_op));
             }
         }
 

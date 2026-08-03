@@ -34,9 +34,14 @@ vk::ShaderStageFlagBits MakeShaderStage(std::size_t index) {
 }
 
 u64 StaticPipelineInfo::OptimizedHash(const Instance& instance) const {
-    u64 info_hash = Common::HashCombine(
-        shader_ids[0], shader_ids[1], shader_ids[2], Common::ComputeStructHash64(vertex_layout),
-        Common::ComputeStructHash64(attachments), Common::ComputeStructHash64(blending));
+    u64 info_hash =
+        Common::HashCombine(shader_ids[0], shader_ids[1], shader_ids[2],
+                            Common::ComputeStructHash64(vertex_layout),
+                            Common::ComputeStructHash64(attachments));
+
+    if (!instance.IsDynamicBlendSupported()) {
+        info_hash = Common::HashCombine(info_hash, Common::ComputeStructHash64(blending));
+    }
 
     if (!instance.IsExtendedDynamicStateSupported()) {
         info_hash = Common::HashCombine(info_hash, Common::ComputeStructHash64(rasterization),
@@ -225,7 +230,7 @@ bool GraphicsPipeline::Build(bool fail_on_compile_required) {
         .pScissors = &scissor,
     };
 
-    boost::container::static_vector<vk::DynamicState, 14> dynamic_states = {
+    boost::container::static_vector<vk::DynamicState, 19> dynamic_states = {
         vk::DynamicState::eViewport,           vk::DynamicState::eScissor,
         vk::DynamicState::eStencilCompareMask, vk::DynamicState::eStencilWriteMask,
         vk::DynamicState::eStencilReference,   vk::DynamicState::eBlendConstants,
@@ -239,6 +244,23 @@ bool GraphicsPipeline::Build(bool fail_on_compile_required) {
             vk::DynamicState::eStencilOpEXT,       vk::DynamicState::eStencilTestEnableEXT,
         };
         dynamic_states.insert(dynamic_states.end(), extended.begin(), extended.end());
+    }
+
+    if (instance.IsDynamicBlendSupported()) {
+        constexpr std::array blend = {
+            vk::DynamicState::eColorBlendEnableEXT,
+            vk::DynamicState::eColorBlendEquationEXT,
+            vk::DynamicState::eColorWriteMaskEXT,
+        };
+        dynamic_states.insert(dynamic_states.end(), blend.begin(), blend.end());
+
+        if (instance.IsDynamicLogicOpSupported()) {
+            constexpr std::array logic = {
+                vk::DynamicState::eLogicOpEnableEXT,
+                vk::DynamicState::eLogicOpEXT,
+            };
+            dynamic_states.insert(dynamic_states.end(), logic.begin(), logic.end());
+        }
     }
 
     const vk::PipelineDynamicStateCreateInfo dynamic_info = {

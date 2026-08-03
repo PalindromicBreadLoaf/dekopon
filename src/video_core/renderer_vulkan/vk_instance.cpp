@@ -402,7 +402,9 @@ bool Instance::CreateDevice() {
         vk::PhysicalDeviceCustomBorderColorFeaturesEXT, vk::PhysicalDeviceIndexTypeUint8FeaturesEXT,
         vk::PhysicalDeviceFragmentShaderInterlockFeaturesEXT,
         vk::PhysicalDevicePipelineCreationCacheControlFeaturesEXT,
-        vk::PhysicalDeviceFragmentShaderBarycentricFeaturesKHR>();
+        vk::PhysicalDeviceFragmentShaderBarycentricFeaturesKHR,
+        vk::PhysicalDeviceExtendedDynamicState2FeaturesEXT,
+        vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT>();
     const vk::StructureChain properties_chain =
         physical_device
             .getProperties2<vk::PhysicalDeviceProperties2, vk::PhysicalDeviceDriverProperties,
@@ -420,7 +422,7 @@ bool Instance::CreateDevice() {
         return false;
     }
 
-    boost::container::static_vector<const char*, 13> enabled_extensions;
+    boost::container::static_vector<const char*, 15> enabled_extensions;
     const auto add_extension = [&](std::string_view extension, bool blacklist = false,
                                    std::string_view reason = "") -> bool {
         const auto result =
@@ -475,6 +477,12 @@ bool Instance::CreateDevice() {
     const bool has_fragment_shader_barycentric =
         add_extension(VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME, is_moltenvk,
                       "the PerVertexKHR attribute is not supported by MoltenVK");
+    const bool has_extended_dynamic_state2 =
+        add_extension(VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME, is_arm || is_qualcomm,
+                      "extended dynamic state is broken on Qualcomm and ARM drivers");
+    const bool has_extended_dynamic_state3 =
+        add_extension(VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME, is_arm || is_qualcomm,
+                      "extended dynamic state is broken on Qualcomm and ARM drivers");
 
     const auto family_properties = physical_device.getQueueFamilyProperties();
     if (family_properties.empty()) {
@@ -533,6 +541,8 @@ bool Instance::CreateDevice() {
         vk::PhysicalDeviceFragmentShaderInterlockFeaturesEXT{},
         vk::PhysicalDevicePipelineCreationCacheControlFeaturesEXT{},
         vk::PhysicalDeviceFragmentShaderBarycentricFeaturesKHR{},
+        vk::PhysicalDeviceExtendedDynamicState2FeaturesEXT{},
+        vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT{},
     };
 
 #define PROP_GET(structName, prop, property) property = properties_chain.get<structName>().prop;
@@ -584,6 +594,34 @@ bool Instance::CreateDevice() {
         device_chain.unlink<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>();
     }
 
+    if (has_extended_dynamic_state3) {
+        bool blend_enable{}, blend_equation{}, write_mask{};
+        FEAT_SET(vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT,
+                 extendedDynamicState3ColorBlendEnable, blend_enable)
+        FEAT_SET(vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT,
+                 extendedDynamicState3ColorBlendEquation, blend_equation)
+        FEAT_SET(vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT,
+                 extendedDynamicState3ColorWriteMask, write_mask)
+        dynamic_color_blend = blend_enable && blend_equation && write_mask;
+
+        bool logic_op_enable{};
+        FEAT_SET(vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT,
+                 extendedDynamicState3LogicOpEnable, logic_op_enable)
+
+        bool logic_op{};
+        if (has_extended_dynamic_state2) {
+            FEAT_SET(vk::PhysicalDeviceExtendedDynamicState2FeaturesEXT, extendedDynamicState2LogicOp,
+                     logic_op)
+        }
+        dynamic_logic_op = logic_op_enable && logic_op;
+    } else {
+        device_chain.unlink<vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT>();
+    }
+
+    if (!has_extended_dynamic_state2 || !dynamic_logic_op) {
+        device_chain.unlink<vk::PhysicalDeviceExtendedDynamicState2FeaturesEXT>();
+    }
+
     if (has_custom_border_color) {
         FEAT_SET(vk::PhysicalDeviceCustomBorderColorFeaturesEXT, customBorderColors,
                  custom_border_color)
@@ -614,6 +652,10 @@ bool Instance::CreateDevice() {
 
 #undef PROP_GET
 #undef FEAT_SET
+
+    LOG_INFO(Render_Vulkan, "Dynamic blend state {} (logic op {})",
+             IsDynamicBlendSupported() ? "enabled" : "unsupported",
+             IsDynamicLogicOpSupported() ? "dynamic" : "static");
 
     // Check layered rendering support on MoltenVK
     // MoltenVK maps Metal's layeredRendering capability to shaderOutputLayer
