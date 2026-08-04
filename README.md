@@ -29,13 +29,19 @@ Other features include:
 - In-game menu accessible via '+' and '-'
 - Cheat, mod (LayeredFS), and texture-pack support
 - System language/region toggle
-- And other things I'm probably forgetting.
 - Arctic Base/Azahar Setup Tool support
+  - It should be noted that Streetpass and Spotpass should not be used in games.
+  - There may be a crash related to trying to access these features, so do try to avoid them.
 - Full 3D support via Nintendo Labo VR Kit/Virtual Boy for Nintendo Switch
 - (Virtual) Cartridge insertion support
 - Resolution Upscaling
 - Amiibo support via .bin amiibo images placed in `amiibo`
 - Camera support via static images placed in `camera`
+- Loading ROMs via USB Mass Storage
+- In-built auto-updater
+- Save management
+- Save states
+- And other things I'm probably forgetting.
 
 Features currently in the pipeline are:
 - More performance improvements
@@ -86,7 +92,57 @@ Currently, selecting a mod from a list is not supported. Be sure that the folder
   effect on the next launch. (You should also really just do this on PC. Performance will be degraded
   using this option.)
 
+# Save management
+
+Press `+` on a title in the library to open its details panel, then `Y` for the save tools.
+Inside that panel:
+
+- `X` makes a new backup of the save currently on the emulated card.
+- `A` restores the highlighted backup over the emulated save.
+- `Y` deletes the highlighted backup.
+- Left/Right switches between save data and extdata, if the title has extdata.
+
+Backups are written to the SD card in Checkpoint's layout, so a real 3DS running Checkpoint
+reads them directly and vice versa:
+
+```
+sdmc:/3ds/Checkpoint/saves/0x<UNIQUEID> <Title>/<backup name>/
+sdmc:/3ds/Checkpoint/extdata/0x<EXTDATAID> <Title>/<backup name>/
+```
+
+**Games that use secure values (notably Pokemon games) will not work copying saves from
+Dekopon -> 3DS.** Going the other way is fine.
+
+# Loading games from USB storage
+
+Dekopon mounts USB mass storage automatically, so drives plugged into the dock (or into the console)
+show up without any extra setup. Yyou'll get a notice naming the mount point when one is inserted or
+the opposite if it is removed.
+
+FAT12/16/32, exFAT, NTFS, and EXT2/3/4 (recommended) are the supported filesystems.
+
+To use a ROM folder on an external drive, go to the Paths tab and set **second ROM folder** to a
+folder on said drive.
+
+Please only use the second folder rather for USB. This folder is rescanned asynchronously on each 
+boot so it's okay to be swapped around constantly.
+
+# Updating
+
+Dekopon can update itself. This is found under **Settings > General**.
+
+- **Check for Updates** asks GitHub what the newest release is and offers to install it, or
+  says if you are on the latest version.
+- **Update Channel** picks between *Stable* and *Prerelease*. Stable releases are less likely to
+  have bugs, but may be behind in features.
+- **Release Notes** shows the notes for the build you're on.
+- **Show What's New** controls whether you get a pop-up on boot after a new update explaining what
+  has changed.
+
+Obviously, this needs a working internet connection.
+
 # Build instructions
+
 ## Required packages
 The current build requires DevkitPro. Please install from here [DevkitPro Install](https://devkitpro.org/wiki/Getting_Started)
 ### DevkitPro Packages
@@ -96,6 +152,7 @@ The current build requires DevkitPro. Please install from here [DevkitPro Instal
 - switch-libpng
 - switch-zlib
 - switch-curl
+- switch-ntfs-3g and switch-lwext4 *(optional. Without them USB drives mount FAT and exFAT only\*\*)*
 - switch-mesa *(only for the legacy GLES backend\*)*
 ### System Packages
 - cmake
@@ -105,6 +162,9 @@ The current build requires DevkitPro. Please install from here [DevkitPro Instal
 NXVK and switch-mesa cannot be included simultaneously, so the driver must be chosen at buildtime.
 NXVK is default since it supports both GL and Vulkan, however, it is possible to swap back to 
 switch-mesa if so desired.
+
+\*\*Both are detected at configure time. If they are missing, configuring prints
+`libusbhsfs: FAT and exFAT support only` and NTFS/EXT drives simply won't mount in that build.
 
 ## 1. Clone the repository
 ```shell
