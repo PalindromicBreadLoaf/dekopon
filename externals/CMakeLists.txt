@@ -341,9 +341,30 @@ endif()
 
 # OpenSSL
 if (DEKOPON)
-    # Stub this for now
-    # TODO: Maybe come back to this?
-    set(OPENSSL_LIBRARIES "")
+    # LibreSSL built for Horizon.
+    set(HAVE_ARC4RANDOM_BUF 1 CACHE INTERNAL "newlib provides arc4random_buf")
+    set(HAVE_ARC4RANDOM_UNIFORM 1 CACHE INTERNAL "newlib provides arc4random_uniform")
+    set(HAVE_ENDIAN_H 1 CACHE INTERNAL "libressl_horizon provides endian.h")
+
+    set(LIBRESSL_SKIP_INSTALL ON CACHE BOOL "")
+    set(OPENSSLDIR "/switch/dekopon/ssl")
+    add_subdirectory(libressl EXCLUDE_FROM_ALL)
+
+    target_sources(crypto_obj PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/libressl/crypto/crypto_lock.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/libressl_horizon/ui_horizon.c")
+
+    foreach(lssl_target crypto_obj ssl_obj)
+        target_include_directories(${lssl_target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/libressl_horizon")
+        target_compile_definitions(${lssl_target} PRIVATE _GNU_SOURCE SSIZE_MAX=__LONG_MAX__ HAVE_INET_NTOP)
+        target_disable_warnings(${lssl_target})
+    endforeach()
+
+    target_include_directories(ssl INTERFACE ./libressl/include)
+    target_disable_warnings(ssl)
+    get_directory_property(OPENSSL_LIBRARIES
+        DIRECTORY libressl
+        DEFINITION OPENSSL_LIBS)
 elseif (USE_SYSTEM_OPENSSL)
     find_package(OpenSSL 1.1)
     set(OPENSSL_LIBRARIES OpenSSL::SSL OpenSSL::Crypto)
@@ -385,9 +406,7 @@ else()
     target_include_directories(httplib INTERFACE ./httplib)
     target_disable_warnings(httplib)
 endif()
-if (NOT DEKOPON)
-    target_compile_options(httplib INTERFACE -DCPPHTTPLIB_OPENSSL_SUPPORT)
-endif()
+target_compile_options(httplib INTERFACE -DCPPHTTPLIB_OPENSSL_SUPPORT)
 target_link_libraries(httplib INTERFACE ${OPENSSL_LIBRARIES})
 
 if (UNIX AND NOT APPLE)

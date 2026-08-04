@@ -512,11 +512,6 @@ target_link_libraries(citra_core PUBLIC citra_common PRIVATE audio_core network 
 target_link_libraries(citra_core PRIVATE Boost::boost Boost::serialization Boost::iostreams httplib)
 target_link_libraries(citra_core PUBLIC dds-ktx PRIVATE cryptopp fmt lodepng open_source_archives)
 
-if (DEKOPON)
-    # Route RAND_bytes to CSRNG via this shim so everyone stays happy
-    target_include_directories(citra_core PRIVATE ${CMAKE_SOURCE_DIR}/externals/switch_stubs)
-endif()
-
 if (ENABLE_WEB_SERVICE)
     target_link_libraries(citra_core PRIVATE web_service)
 endif()
