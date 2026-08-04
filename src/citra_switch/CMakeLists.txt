@@ -69,8 +69,7 @@ find_library(SWITCH_JPEG jpeg REQUIRED)
 target_include_directories(citra_switch PRIVATE ${SWITCH_JPEG_INCLUDE_DIR})
 target_link_libraries(citra_switch PRIVATE ${SWITCH_JPEG})
 
-# The GLES bring-up path pulls the switch-mesa EGL/GLES driver. It is mutually exclusive with NXVK
-# until NXVK either supports nouveau or Zink (or both).
+# The GLES bring-up path pulls the switch-mesa EGL/GLES driver.
 if (ENABLE_OPENGL)
     # EGL provided by switch-mesa
     find_path(SWITCH_GL_INCLUDE_DIR EGL/egl.h REQUIRED)
