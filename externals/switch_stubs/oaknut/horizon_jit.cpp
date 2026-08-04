@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <memory>
 #include <mutex>
 #include <vector>
@@ -46,17 +47,35 @@ struct Chunk {
     std::uint8_t* rx{};
     std::size_t size{};
     std::vector<Block> blocks;
+    bool open{};
+
+    ~Chunk() {
+        if (open) {
+            jitClose(&jit);
+        }
+    }
 };
 
 /// What JitAllocation::handle points at.
 struct Allocation {
-    Chunk* chunk;             /// Null for a dedicated allocation.
-    std::unique_ptr<Jit> jit; /// Dedicated allocations only.
+    Chunk* chunk;  /// Null for a dedicated allocation.
+    Jit* jit;      /// Dedicated allocations only.
     std::size_t offset;
 };
 
-std::mutex pool_mutex;
-std::vector<std::unique_ptr<Chunk>> chunks;
+struct Pool {
+    std::mutex mutex;
+    std::vector<std::unique_ptr<Chunk>> chunks;
+    std::vector<std::unique_ptr<Jit>> dedicated;
+    bool closed = false;
+};
+
+Pool* live_pool = nullptr;
+
+Pool& GetPool() {
+    static Pool* const pool = live_pool = new Pool{};
+    return *pool;
+}
 
 bool CreateJit(Jit* jit, std::size_t size) {
     if (R_FAILED(jitCreate(jit, size))) {
@@ -74,17 +93,18 @@ bool CreateJit(Jit* jit, std::size_t size) {
     return true;
 }
 
-Chunk* AddChunk(std::size_t min_size) {
+Chunk* AddChunk(Pool& pool, std::size_t min_size) {
     auto chunk = std::make_unique<Chunk>();
     chunk->size = std::max(CHUNK_SIZE, AlignUp(min_size, CHUNK_SIZE));
     if (!CreateJit(&chunk->jit, chunk->size)) {
         return nullptr;
     }
 
+    chunk->open = true;
     chunk->rw = static_cast<std::uint8_t*>(jitGetRwAddr(&chunk->jit));
     chunk->rx = static_cast<std::uint8_t*>(jitGetRxAddr(&chunk->jit));
     chunk->blocks.push_back({0, chunk->size, true});
-    return chunks.emplace_back(std::move(chunk)).get();
+    return pool.chunks.emplace_back(std::move(chunk)).get();
 }
 
 /// First-fit.
@@ -135,12 +155,32 @@ JitAllocation Handle(Chunk* chunk, std::size_t offset) {
     return {allocation, chunk->rw + offset, chunk->rx + offset};
 }
 
+void CloseRemainingJits() {
+    if (live_pool == nullptr) {
+        return;
+    }
+    std::lock_guard lock{live_pool->mutex};
+    live_pool->closed = true;
+    for (auto& jit : live_pool->dedicated) {
+        jitClose(jit.get());
+    }
+    live_pool->dedicated.clear();
+    live_pool->chunks.clear();
+}
+
+[[gnu::constructor(101)]] void InstallJitPoolShutdown() {
+    std::atexit(CloseRemainingJits);
+}
+
 } // Anonymous namespace
 
 JitAllocation JitAllocate(std::size_t size) {
     if (size == 0) {
         return {nullptr, nullptr, nullptr};
     }
+
+    Pool& pool = GetPool();
+    std::lock_guard lock{pool.mutex};
 
     if (size >= DEDICATED_THRESHOLD) {
         auto jit = std::make_unique<Jit>();
@@ -149,20 +189,19 @@ JitAllocation JitAllocate(std::size_t size) {
         }
         void* const rw = jitGetRwAddr(jit.get());
         void* const rx = jitGetRxAddr(jit.get());
-        return {new Allocation{nullptr, std::move(jit), 0}, rw, rx};
+        Jit* const owned = pool.dedicated.emplace_back(std::move(jit)).get();
+        return {new Allocation{nullptr, owned, 0}, rw, rx};
     }
 
     const std::size_t needed = AlignUp(size, BLOCK_ALIGN);
-    std::lock_guard lock{pool_mutex};
-
-    for (auto& chunk : chunks) {
+    for (auto& chunk : pool.chunks) {
         std::size_t offset;
         if (AllocateIn(*chunk, needed, offset)) {
             return Handle(chunk.get(), offset);
         }
     }
 
-    Chunk* const chunk = AddChunk(needed);
+    Chunk* const chunk = AddChunk(pool, needed);
     std::size_t offset;
     if (chunk == nullptr || !AllocateIn(*chunk, needed, offset)) {
         return {nullptr, nullptr, nullptr};
@@ -176,21 +215,31 @@ void JitFree(void* handle) {
     }
 
     const std::unique_ptr<Allocation> allocation{static_cast<Allocation*>(handle)};
-    if (allocation->chunk == nullptr) {
-        jitClose(allocation->jit.get());
+    Pool& pool = GetPool();
+    std::lock_guard lock{pool.mutex};
+    if (pool.closed) {
         return;
     }
 
-    std::lock_guard lock{pool_mutex};
+    if (allocation->chunk == nullptr) {
+        const auto it =
+            std::find_if(pool.dedicated.begin(), pool.dedicated.end(),
+                         [&](const auto& jit) { return jit.get() == allocation->jit; });
+        if (it != pool.dedicated.end()) {
+            jitClose(it->get());
+            pool.dedicated.erase(it);
+        }
+        return;
+    }
+
     FreeIn(*allocation->chunk, allocation->offset);
 
     // Hand the Jit area back once nothing is left in it.
-    const auto it = std::find_if(chunks.begin(), chunks.end(), [&](const auto& chunk) {
+    const auto it = std::find_if(pool.chunks.begin(), pool.chunks.end(), [&](const auto& chunk) {
         return chunk.get() == allocation->chunk;
     });
-    if (it != chunks.end() && (*it)->blocks.size() == 1 && (*it)->blocks.front().free) {
-        jitClose(&(*it)->jit);
-        chunks.erase(it);
+    if (it != pool.chunks.end() && (*it)->blocks.size() == 1 && (*it)->blocks.front().free) {
+        pool.chunks.erase(it);
     }
 }
 
