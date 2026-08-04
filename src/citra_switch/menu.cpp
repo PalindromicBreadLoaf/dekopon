@@ -28,6 +28,7 @@
 #include "citra_switch/menu.h"
 #include "citra_switch/menu_data.h"
 #include "citra_switch/rail_icons.h"
+#include "citra_switch/save_manager.h"
 #include "citra_switch/settings_menu.h"
 #include "citra_switch/updater.h"
 #include "citra_switch/usb_storage.h"
@@ -641,6 +642,10 @@ enum ArticRow {
 constexpr int kCountryRows = 9;
 constexpr int kCountryRowH = 40;
 
+// Backup list inside the save manager panel.
+constexpr int kSavesRows = 6;
+constexpr int kSavesRowH = 34;
+
 // The folder browser covers the whole screen, rail included.
 constexpr int kBrowseTop = 108;
 constexpr int kBrowseRowH = 44;
@@ -999,6 +1004,9 @@ void DrawTitleDetails(Canvas& c, const GameEntry& game, const TitleDetails& deta
     if (game.insertable) {
         hx += DrawHint(c, hx, hy, "X", inserted ? "Eject Cartridge" : "Insert Cartridge") + 22;
     }
+    if (game.program_id != 0) {
+        hx += DrawHint(c, hx, hy, "Y", "Manage Saves") + 22;
+    }
     DrawHint(c, hx, hy, "B", "Close");
 }
 
@@ -1323,12 +1331,16 @@ public:
                 HandleLayoutPicker(down, nav);
             } else if (remap_open) {
                 HandleRemap(down, nav, dpad_nav);
+            } else if (saves_open) {
+                HandleSaves(down, nav);
             } else if (details_open) {
                 const GameEntry& game = games[filtered[selected]];
                 if ((down & HidNpadButton_X) && game.insertable) {
                     SetInsertedCartridge(GetInsertedCartridge() == game.path ? "" : game.path);
                 }
-                if (down & (HidNpadButton_A | HidNpadButton_B | HidNpadButton_Plus)) {
+                if ((down & HidNpadButton_Y) && game.program_id != 0) {
+                    OpenSaves();
+                } else if (down & (HidNpadButton_A | HidNpadButton_B | HidNpadButton_Plus)) {
                     details_open = false;
                 }
             } else if (focus == Focus::Rail) {
@@ -1349,8 +1361,9 @@ public:
             }
 
             if (!install_active && !update_download_active && !update_installed &&
-                !UpdateModalOpen() && !info_card && !details_open && !layout_picker_open &&
-                !remap_open && !preset_picker_open && !country_picker_open && !confirm) {
+                !UpdateModalOpen() && !info_card && !details_open && !saves_open &&
+                !layout_picker_open && !remap_open && !preset_picker_open && !country_picker_open &&
+                !confirm) {
                 HandleTouch();
             }
             if (pending_launch) {
@@ -1422,6 +1435,15 @@ private:
     // Library detail panel.
     bool details_open = false;
     TitleDetails details{};
+
+    // Save manager.
+    bool saves_open = false;
+    SaveKind saves_kind{SaveKind::SaveData};
+    std::uint64_t saves_extdata_id = 0;
+    std::vector<SaveBackup> saves_backups;
+    bool saves_present = false; // Whether the emulated card holds a save of the current kind.
+    int saves_sel = 0;
+    int saves_scroll = 0;
 
     // R3 screen-layout picker.
     bool layout_picker_open = false;
@@ -1658,6 +1680,135 @@ private:
         }
         EnsureVisible(grid);
         return false;
+    }
+
+    void OpenSaves() {
+        ShowBusy("Reading saves...");
+        saves_extdata_id = GetExtDataId(games[filtered[selected]]);
+        saves_kind = SaveKind::SaveData;
+        saves_sel = 0;
+        saves_scroll = 0;
+        RefreshSaves();
+        details_open = false;
+        saves_open = true;
+    }
+
+    void RefreshSaves() {
+        const GameEntry& game = games[filtered[selected]];
+        saves_backups = ListBackups(game, saves_kind, saves_extdata_id);
+        saves_present = HasSaveData(game, saves_kind, saves_extdata_id);
+        saves_sel =
+            std::clamp(saves_sel, 0, std::max(0, static_cast<int>(saves_backups.size()) - 1));
+    }
+
+    void HandleSaves(u64 down, u32 nav) {
+        const int count = static_cast<int>(saves_backups.size());
+        if (nav & DirUp) {
+            saves_sel = std::max(0, saves_sel - 1);
+        }
+        if (nav & DirDown) {
+            saves_sel = std::min(std::max(0, count - 1), saves_sel + 1);
+        }
+        // A title without extdata has nothing to switch to.
+        if ((nav & (DirLeft | DirRight)) && saves_extdata_id != 0) {
+            saves_kind =
+                saves_kind == SaveKind::SaveData ? SaveKind::ExtData : SaveKind::SaveData;
+            saves_sel = 0;
+            saves_scroll = 0;
+            RefreshSaves();
+        }
+        saves_scroll = std::clamp(saves_scroll, std::max(0, saves_sel - kSavesRows + 1),
+                                  std::max(0, std::min(saves_sel, count - kSavesRows)));
+        if (down & HidNpadButton_X) {
+            PromptBackup();
+        }
+        if ((down & HidNpadButton_A) && saves_sel < count) {
+            OpenRestoreConfirm(saves_backups[saves_sel]);
+        }
+        if ((down & HidNpadButton_Y) && saves_sel < count) {
+            OpenDeleteBackupConfirm(saves_backups[saves_sel]);
+        }
+        if (down & HidNpadButton_B) {
+            saves_open = false;
+            details_open = true;
+        }
+    }
+
+    void PromptBackup() {
+        const std::optional<std::string> entered =
+            PromptSettingText("Backup name", "Name for this backup", DefaultBackupName(), 64);
+        if (!entered) {
+            return;
+        }
+        const std::string name = SanitizeBackupName(*entered);
+        if (name.empty()) {
+            ShowNotice("That name can't be used", true);
+            return;
+        }
+        const bool exists = std::any_of(saves_backups.begin(), saves_backups.end(),
+                                        [&name](const SaveBackup& b) { return b.name == name; });
+        if (exists) {
+            confirm = ConfirmPrompt{"Overwrite backup",
+                                    {"\"" + name + "\" already exists.", "It will be replaced."},
+                                    {},
+                                    "Overwrite",
+                                    [this, name] { RunExport(name); },
+                                    {}};
+            return;
+        }
+        RunExport(name);
+    }
+
+    void RunExport(const std::string& name) {
+        ShowBusy("Backing up...");
+        const SaveResult result =
+            ExportSave(games[filtered[selected]], saves_kind, saves_extdata_id, name);
+        if (result == SaveResult::Success) {
+            saves_sel = 0;
+            saves_scroll = 0;
+            RefreshSaves();
+            ShowNotice("Backed up as " + name, false);
+        } else {
+            ShowNotice(SaveResultText(result), true);
+        }
+    }
+
+    void OpenRestoreConfirm(const SaveBackup& backup) {
+        confirm = ConfirmPrompt{
+            "Restore backup",
+            {std::string{SaveKindName(saves_kind)} + " will be replaced with",
+             "\"" + backup.name + "\"."},
+            "The save currently on the card is deleted.",
+            "Restore",
+            [this, backup] { RunRestore(backup); },
+            {}};
+    }
+
+    void RunRestore(const SaveBackup& backup) {
+        ShowBusy("Restoring...");
+        const SaveResult result =
+            ImportSave(games[filtered[selected]], saves_kind, saves_extdata_id, backup);
+        RefreshSaves();
+        ShowNotice(result == SaveResult::Success ? "Restored " + backup.name
+                                                 : std::string{SaveResultText(result)},
+                   result != SaveResult::Success);
+    }
+
+    void OpenDeleteBackupConfirm(const SaveBackup& backup) {
+        confirm = ConfirmPrompt{"Delete backup",
+                                {"\"" + backup.name + "\" will be deleted."},
+                                {},
+                                "Delete",
+                                [this, backup] { RunDeleteBackup(backup); },
+                                {}};
+    }
+
+    void RunDeleteBackup(const SaveBackup& backup) {
+        ShowBusy("Deleting...");
+        const bool ok = DeleteBackup(backup);
+        RefreshSaves();
+        ShowNotice(ok ? "Deleted " + backup.name : std::string{"Could not delete that backup"},
+                   !ok);
     }
 
     // Row model for the Install page: ".." (unless listing devices), then subfolders, then CIAs.
@@ -3067,6 +3218,82 @@ private:
         DrawHint(c, hx, hy, "B", "Cancel");
     }
 
+    void DrawSavesPanel(Canvas& c) {
+        const GameEntry& game = games[filtered[selected]];
+        const int w = std::min(660, ContentW() - 48);
+        constexpr int h = 430;
+        const int x = kContentX + (ContentW() - w) / 2;
+        const int y = kContentTop + (ContentBottom() - kContentTop - h) / 2;
+        c.FillRect(0, 0, g_screen_w, g_screen_h, MakeColor(0x10, 0x11, 0x13, 0xC0));
+        c.RoundBorder(x, y, w, h, 14, 2, kColBadge, kColSurface);
+
+        int ty = y + 22;
+        g_font.Draw(c, x + 24, ty + 20, g_font.Truncate(game.title, 24, w - 48), 24, kColText);
+        ty += 38;
+
+        int cx = x + 24;
+        for (const SaveKind kind : {SaveKind::SaveData, SaveKind::ExtData}) {
+            const bool active = kind == saves_kind;
+            const bool usable = kind == SaveKind::SaveData || saves_extdata_id != 0;
+            const char* label = SaveKindName(kind);
+            const int chip_w = g_font.Measure(label, 18) + 28;
+            c.FillRoundRect(cx, ty, chip_w, 30, 15, active ? kColAccent : kColBadge);
+            g_font.Draw(c, cx + 14, CenterBaseline(ty, 30, 18), label, 18,
+                        active ? kColOnAccent : (usable ? kColText : kColTextDim));
+            cx += chip_w + 10;
+        }
+        if (saves_extdata_id == 0) {
+            g_font.Draw(c, cx + 6, CenterBaseline(ty, 30, 16), "none", 16, kColTextDim);
+        }
+        ty += 38;
+
+        g_font.Draw(c, x + 24, ty + 16,
+                    saves_present ? "Save present on the emulated card"
+                                  : "Nothing on the emulated card to back up",
+                    16, saves_present ? kColTextDim : kColError);
+        ty += 26;
+        c.FillRect(x + 24, ty, w - 48, 1, kColRail);
+        ty += 10;
+
+        const int count = static_cast<int>(saves_backups.size());
+        if (count == 0) {
+            g_font.Draw(c, x + 24, ty + 24, "No backups yet.", 18, kColTextDim);
+            g_font.Draw(c, x + 24, ty + 50, "Press X to create one.", 18, kColTextDim);
+        }
+        for (int i = 0; i < std::min(count - saves_scroll, kSavesRows); ++i) {
+            const SaveBackup& backup = saves_backups[saves_scroll + i];
+            const int row_y = ty + i * kSavesRowH;
+            const bool selected_row = saves_scroll + i == saves_sel;
+            if (selected_row) {
+                c.FillRoundRect(x + 20, row_y, w - 52, kSavesRowH - 4, 8, kColSurfaceHi);
+            }
+            const std::string detail = FormatSize(backup.size) + "  " +
+                                       std::to_string(backup.files) +
+                                       (backup.files == 1 ? " file" : " files");
+            const int detail_w = g_font.Measure(detail, 16);
+            g_font.Draw(c, x + 30, CenterBaseline(row_y, kSavesRowH - 4, 18),
+                        g_font.Truncate(backup.name, 18, w - 96 - detail_w), 18,
+                        selected_row ? kColText : kColTextDim);
+            g_font.Draw(c, x + w - 40 - detail_w, CenterBaseline(row_y, kSavesRowH - 4, 16), detail,
+                        16, kColTextDim);
+        }
+        DrawListScrollbar(c, x + w - 20, ty, kSavesRows, kSavesRowH, count, saves_scroll);
+
+        int hx = x + 24;
+        const int hy = y + h - 38;
+        if (count > 0) {
+            hx += DrawHint(c, hx, hy, "A", "Restore") + 18;
+        }
+        hx += DrawHint(c, hx, hy, "X", "Back up") + 18;
+        if (count > 0) {
+            hx += DrawHint(c, hx, hy, "Y", "Delete") + 18;
+        }
+        if (saves_extdata_id != 0) {
+            hx += DrawHint(c, hx, hy, "<>", "Kind") + 18;
+        }
+        DrawHint(c, hx, hy, "B", "Close");
+    }
+
     void Draw() {
         Canvas& c = canvas;
         c.Clear(kColBg);
@@ -3086,6 +3313,9 @@ private:
         DrawHintBar(c);
         if (details_open && !filtered.empty()) {
             DrawTitleDetails(c, games[filtered[selected]], details);
+        }
+        if (saves_open && !filtered.empty()) {
+            DrawSavesPanel(c);
         }
         if (layout_picker_open) {
             DrawLayoutPicker(c);

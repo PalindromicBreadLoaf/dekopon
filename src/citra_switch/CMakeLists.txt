@@ -35,6 +35,8 @@ add_executable(citra_switch
     overlay_menu.cpp
     overlay_menu.h
     rail_icons.h
+    save_manager.cpp
+    save_manager.h
     settings_menu.cpp
     settings_menu.h
     updater.cpp
