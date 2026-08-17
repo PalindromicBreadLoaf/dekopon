@@ -65,6 +65,7 @@ protected:
 
 private:
     void ServeBreak(int signal);
+    void PruneStaleJits();
 
     friend class DynarmicUserCallbacks;
     Core::System& system;
@@ -78,7 +79,10 @@ private:
 
     Dynarmic::A32::Jit* jit = nullptr;
     std::shared_ptr<Memory::PageTable> current_page_table = nullptr;
-    std::map<std::shared_ptr<Memory::PageTable>, std::unique_ptr<Dynarmic::A32::Jit>> jits;
+    // Keyed weakly so a process's JIT is not kept alive past the process itself.
+    std::map<std::weak_ptr<Memory::PageTable>, std::unique_ptr<Dynarmic::A32::Jit>,
+             std::owner_less<>>
+        jits;
 };
 
 } // namespace Core

@@ -7,6 +7,7 @@
 #include <dynarmic/interface/A32/a32.h>
 #include <dynarmic/interface/optimization_flags.h>
 #include "common/assert.h"
+#include "common/logging/log.h"
 #include "common/microprofile.h"
 #include "core/arm/dynarmic/arm_dynarmic.h"
 #include "core/arm/dynarmic/arm_dynarmic_cp15.h"
@@ -334,14 +335,23 @@ void ARM_Dynarmic::SetPageTable(const std::shared_ptr<Memory::PageTable>& page_t
     auto iter = jits.find(current_page_table);
     if (iter == jits.end()) {
         iter = jits.emplace(current_page_table, MakeJit()).first;
+        LOG_INFO(Core_ARM11, "Created JIT for core {} page table; {} now live", GetID(),
+                 jits.size());
     }
     jit = iter->second.get();
     LoadContext(ctx);
 
-    // The JIT built in the constructor predates every process, so it is keyed by a null page
-    // table and is abandoned the moment one loads.
-    if (current_page_table) {
-        jits.erase(nullptr);
+    PruneStaleJits();
+}
+
+// Drop JITs whose process has died.
+void ARM_Dynarmic::PruneStaleJits() {
+    for (auto it = jits.begin(); it != jits.end();) {
+        if (it->second.get() != jit && it->first.expired()) {
+            it = jits.erase(it);
+        } else {
+            ++it;
+        }
     }
 }
 
@@ -371,10 +381,10 @@ std::unique_ptr<Dynarmic::A32::Jit> ARM_Dynarmic::MakeJit() {
     config.global_monitor = &exclusive_monitor.monitor;
 
 #ifdef __SWITCH__
-    // libnx backs a JIT region with an equally sized heap allocation, and dynarmic's per-block
-    // bookkeeping costs another two to three times the code it describes. At dynarmic's 128 MiB
-    // default a New 3DS title reserves four of these and exhausts the heap mid-game.
-    config.code_cache_size = 32 * 1024 * 1024;
+    config.code_cache_size = 48 * 1024 * 1024;
+    config.code_cache_full_callback = [] {
+        LOG_WARNING(Core_ARM11, "JIT code cache exhausted; dropping and recompiling");
+    };
 #endif
 
     return std::make_unique<Dynarmic::A32::Jit>(config);
