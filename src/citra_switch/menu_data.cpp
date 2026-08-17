@@ -36,6 +36,7 @@ constexpr std::uint64_t kTidHighApplication = 0x0004000000000000ULL;
 constexpr std::uint64_t kTidHighDemo = 0x0004000200000000ULL;
 constexpr std::uint64_t kTidHighUpdate = 0x0004000E00000000ULL;
 constexpr std::uint64_t kTidHighDlc = 0x0004008C00000000ULL;
+constexpr std::uint64_t kTidHighSystemApplication = 0x0004001000000000ULL;
 
 // Don't scan updates/dlcs into the library window.
 constexpr std::array<std::uint64_t, 2> kLibraryTidHighs{kTidHighApplication, kTidHighDemo};
@@ -196,45 +197,51 @@ bool ParseTidLow(const std::string& name, std::uint32_t& out) {
     return true;
 }
 
-// Adds the titles installed under the emulated SD card's title tree.
-void ScanInstalled(std::vector<GameEntry>& out) {
-    const std::string title_root =
-        Service::AM::GetMediaTitlePath(Service::FS::MediaType::SDMC);
-    for (const std::uint64_t high : kLibraryTidHighs) {
-        const std::string dir = fmt::format("{}{:08x}/", title_root, high >> 32);
-        FileUtil::ForeachDirectoryEntry(
-            nullptr, dir,
-            [&out, high](u64*, const std::string& parent, const std::string& virtual_name) {
-                if (!FileUtil::IsDirectory(parent + virtual_name)) {
-                    return true;
-                }
-                std::uint32_t low = 0;
-                if (!ParseTidLow(virtual_name, low)) {
-                    return true;
-                }
-                const std::uint64_t tid = high | low;
-                // Resolves the boot content through the title's TMD, so it picks the same .app
-                // the loader would boot.
-                const std::string content =
-                    Service::AM::GetTitleContentPath(Service::FS::MediaType::SDMC, tid);
-                if (content.empty() || !FileUtil::Exists(content)) {
-                    return true;
-                }
-                GameEntry entry;
-                if (!TryLoad(content, fmt::format("{:016X}", tid), entry)) {
-                    return true;
-                }
-                entry.installed = true;
-                if (entry.program_id == 0) {
-                    entry.program_id = tid;
-                }
-                out.push_back(std::move(entry));
+// Adds the titles under one title-high folder of a media's title tree.
+void ScanInstalledHigh(Service::FS::MediaType media, std::uint64_t high,
+                       std::vector<GameEntry>& out) {
+    const std::string dir =
+        fmt::format("{}{:08x}/", Service::AM::GetMediaTitlePath(media), high >> 32);
+    FileUtil::ForeachDirectoryEntry(
+        nullptr, dir,
+        [&out, media, high](u64*, const std::string& parent, const std::string& virtual_name) {
+            if (!FileUtil::IsDirectory(parent + virtual_name)) {
                 return true;
-            });
-    }
+            }
+            std::uint32_t low = 0;
+            if (!ParseTidLow(virtual_name, low)) {
+                return true;
+            }
+            const std::uint64_t tid = high | low;
+            // Resolves the boot content through the title's TMD, so it picks the same .app
+            // the loader would boot.
+            const std::string content = Service::AM::GetTitleContentPath(media, tid);
+            if (content.empty() || !FileUtil::Exists(content)) {
+                return true;
+            }
+            GameEntry entry;
+            if (!TryLoad(content, fmt::format("{:016X}", tid), entry)) {
+                return true;
+            }
+            entry.installed = true;
+            if (entry.program_id == 0) {
+                entry.program_id = tid;
+            }
+            out.push_back(std::move(entry));
+            return true;
+        });
 }
 
-// Reads a CIA's header and TMD, which both sit ahead of the content.
+// Adds the titles installed on the emulated SD card, plus the launchable system applications
+// on the emulated NAND
+void ScanInstalled(std::vector<GameEntry>& out) {
+    for (const std::uint64_t high : kLibraryTidHighs) {
+        ScanInstalledHigh(Service::FS::MediaType::SDMC, high, out);
+    }
+    ScanInstalledHigh(Service::FS::MediaType::NAND, kTidHighSystemApplication, out);
+}
+
+// Reads a CIA's header and TMD
 bool ReadCiaEntry(const std::string& path, CiaEntry& entry) {
     std::unique_ptr<FileUtil::IOFileBase> file = std::make_unique<FileUtil::IOFile>(path, "rb");
     if (!file->IsOpen()) {
