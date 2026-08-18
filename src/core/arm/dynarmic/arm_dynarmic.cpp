@@ -9,6 +9,9 @@
 #include "common/assert.h"
 #include "common/logging/log.h"
 #include "common/microprofile.h"
+#ifdef __SWITCH__
+#include "common/horizon_meminfo.h"
+#endif
 #include "core/arm/dynarmic/arm_dynarmic.h"
 #include "core/arm/dynarmic/arm_dynarmic_cp15.h"
 #include "core/arm/dynarmic/arm_exclusive_monitor.h"
@@ -346,14 +349,54 @@ void ARM_Dynarmic::SetPageTable(const std::shared_ptr<Memory::PageTable>& page_t
 
 // Drop JITs whose process has died.
 void ARM_Dynarmic::PruneStaleJits() {
+    std::size_t pruned = 0;
     for (auto it = jits.begin(); it != jits.end();) {
         if (it->second.get() != jit && it->first.expired()) {
             it = jits.erase(it);
+            ++pruned;
         } else {
             ++it;
         }
     }
+    if (pruned != 0) {
+        LOG_INFO(Core_ARM11, "Reclaimed {} stale JIT(s) on core {}. {} now live", pruned, GetID(),
+                 jits.size());
+    }
 }
+
+#ifdef __SWITCH__
+void ARM_Dynarmic::OnCacheDrop() {
+    ++cache_drops_total;
+    ++cache_drops_window;
+
+    const auto now = std::chrono::steady_clock::now();
+    if (now - last_drop_report < std::chrono::seconds(1)) {
+        return;
+    }
+    const auto elapsed_ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(now - last_drop_report).count();
+    const u64 window = cache_drops_window;
+    cache_drops_window = 0;
+    last_drop_report = now;
+
+    const u64 used_mib = Common::GetHorizonMemoryUsed() >> 20;
+    const u64 total_mib = Common::GetHorizonMemoryTotal() >> 20;
+
+    if (window * 1000 > 4 * static_cast<u64>(elapsed_ms)) {
+        LOG_CRITICAL(Core_ARM11,
+                     "JIT-DIAG FREEZE: recompile storm on core {} - {} cache drops in {} ms ({} "
+                     "total). {} JITs live. heap {}/{} MiB used.",
+                     GetID(), window, elapsed_ms, cache_drops_total, jits.size(), used_mib,
+                     total_mib);
+    } else {
+        LOG_WARNING(Core_ARM11,
+                    "JIT-DIAG: {} cache drop(s) in {} ms on core {} ({} total). {} JITs live. heap "
+                    "{}/{} MiB used.",
+                    window, elapsed_ms, GetID(), cache_drops_total, jits.size(), used_mib,
+                    total_mib);
+    }
+}
+#endif
 
 void ARM_Dynarmic::ServeBreak([[maybe_unused]] int signal) {
 #ifdef ENABLE_GDBSTUB
@@ -382,9 +425,7 @@ std::unique_ptr<Dynarmic::A32::Jit> ARM_Dynarmic::MakeJit() {
 
 #ifdef __SWITCH__
     config.code_cache_size = 48 * 1024 * 1024;
-    config.code_cache_full_callback = [] {
-        LOG_WARNING(Core_ARM11, "JIT code cache exhausted; dropping and recompiling");
-    };
+    config.code_cache_full_callback = [this] { OnCacheDrop(); };
 #endif
 
     return std::make_unique<Dynarmic::A32::Jit>(config);

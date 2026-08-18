@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <chrono>
 #include <map>
 #include <memory>
 #include <dynarmic/interface/A32/a32.h>
@@ -66,6 +67,9 @@ protected:
 private:
     void ServeBreak(int signal);
     void PruneStaleJits();
+#ifdef __SWITCH__
+    void OnCacheDrop();
+#endif
 
     friend class DynarmicUserCallbacks;
     Core::System& system;
@@ -83,6 +87,13 @@ private:
     std::map<std::weak_ptr<Memory::PageTable>, std::unique_ptr<Dynarmic::A32::Jit>,
              std::owner_less<>>
         jits;
+
+#ifdef __SWITCH__
+    // Whole-cache drop accounting for the freeze diagnostic.
+    u64 cache_drops_total = 0;
+    u64 cache_drops_window = 0;
+    std::chrono::steady_clock::time_point last_drop_report{};
+#endif
 };
 
 } // namespace Core
