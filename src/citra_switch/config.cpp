@@ -354,6 +354,9 @@ private:
         SwitchFrontend::SetGyroSensitivity(
             config->GetInteger("Switch", "gyro_sensitivity_x", 100),
             config->GetInteger("Switch", "gyro_sensitivity_y", 100));
+        SwitchFrontend::SetGyroSource(static_cast<SwitchFrontend::GyroSource>(
+            std::clamp<long>(config->GetInteger("Switch", "gyro_source", 0), 0,
+                             SwitchFrontend::NumGyroSources - 1)));
 
         SwitchFrontend::SetPauseInQuickMenu(
             config->GetBoolean("Switch", "pause_in_quick_menu", false));
@@ -429,6 +432,7 @@ private:
         ss << "pointer_source = " << static_cast<int>(SwitchFrontend::GetPointerSource()) << '\n';
         ss << "gyro_sensitivity_x = " << SwitchFrontend::GetGyroSensitivityX() << '\n';
         ss << "gyro_sensitivity_y = " << SwitchFrontend::GetGyroSensitivityY() << '\n';
+        ss << "gyro_source = " << static_cast<int>(SwitchFrontend::GetGyroSource()) << '\n';
         ss << "layout_cycle_mask = " << SwitchFrontend::GetLayoutCycleMask() << '\n';
         ss << "pause_in_quick_menu = "
            << (SwitchFrontend::IsPauseInQuickMenu() ? "true" : "false") << '\n';

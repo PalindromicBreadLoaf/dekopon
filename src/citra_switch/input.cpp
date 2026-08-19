@@ -59,6 +59,7 @@ bool s_touch_active{};
 // The position is stored as a fraction of the bottom screen so it stays valid across layout
 // changes and can never leave the screen (it is clamped to [0, 1]).
 std::atomic<PointerSource> s_pointer_source{PointerSource::LeftStick};
+std::atomic<GyroSource> s_gyro_source{GyroSource::Automatic};
 std::atomic<int> s_gyro_sensitivity_x{100};
 std::atomic<int> s_gyro_sensitivity_y{100};
 std::atomic<bool> s_pointer_mode{false};
@@ -516,6 +517,33 @@ const char* PointerSourceName(PointerSource source) {
     case PointerSource::RightStick:
         return "Right Stick";
     case PointerSource::Count:
+        break;
+    }
+    return "";
+}
+
+GyroSource GetGyroSource() {
+    return s_gyro_source.load(std::memory_order_relaxed);
+}
+
+void SetGyroSource(GyroSource source) {
+    if (source >= GyroSource::Count) {
+        source = GyroSource::Automatic;
+    }
+    s_gyro_source.store(source, std::memory_order_relaxed);
+}
+
+const char* GyroSourceName(GyroSource source) {
+    switch (source) {
+    case GyroSource::Automatic:
+        return "Automatic (Default)";
+    case GyroSource::LeftController:
+        return "Left Controller";
+    case GyroSource::RightController:
+        return "Right Controller";
+    case GyroSource::Console:
+        return "Console / Handheld";
+    case GyroSource::Count:
         break;
     }
     return "";
