@@ -117,6 +117,8 @@ gyro_sensitivity_y =
 # Motion sensor source. 0: automatic (default), 1: left controller, 2: right controller,
 # 3: console/handheld sensor fusion.
 gyro_source =
+# Physical gyro orientation. 0: horizontal (default), 1: vertical (follows the screen direction).
+gyro_orientation =
 # Bitmask of screen-layout presets the R3 button cycles through (bit 0 = the first preset).
 # Defaults to every preset enabled. The quick menu always offers every layout.
 layout_cycle_mask =

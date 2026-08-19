@@ -111,6 +111,14 @@ enum class GyroSource : std::uint8_t {
 
 inline constexpr int NumGyroSources = static_cast<int>(GyroSource::Count);
 
+enum class GyroOrientation : std::uint8_t {
+    Horizontal,
+    Vertical,
+    Count,
+};
+
+inline constexpr int NumGyroOrientations = static_cast<int>(GyroOrientation::Count);
+
 // The bottom-screen pointer position as a fraction of the bottom screen, for the crosshair.
 struct PointerCursor {
     bool active{};
@@ -164,6 +172,10 @@ const char* GyroSourceName(GyroSource source);
 int GetGyroSensitivityX();
 int GetGyroSensitivityY();
 void SetGyroSensitivity(int x_percent, int y_percent);
+
+GyroOrientation GetGyroOrientation();
+void SetGyroOrientation(GyroOrientation orientation);
+const char* GyroOrientationName(GyroOrientation orientation);
 
 // Pointer mode lets the stick/gyro drive the 3DS touchscreen with ZL/ZR as the tap.
 bool IsPointerModeActive();

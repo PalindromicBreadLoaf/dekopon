@@ -62,6 +62,7 @@ std::atomic<PointerSource> s_pointer_source{PointerSource::LeftStick};
 std::atomic<GyroSource> s_gyro_source{GyroSource::Automatic};
 std::atomic<int> s_gyro_sensitivity_x{100};
 std::atomic<int> s_gyro_sensitivity_y{100};
+std::atomic<GyroOrientation> s_gyro_orientation{GyroOrientation::Horizontal};
 std::atomic<bool> s_pointer_mode{false};
 std::atomic<float> s_pointer_fx{0.5f};
 std::atomic<float> s_pointer_fy{0.5f};
@@ -200,6 +201,22 @@ std::string MotionParam() {
 // touch screen) and z+ (up) read off the Switch's -x, z and y respectively.
 Common::Vec3<float> ToConsoleFrame(float x, float y, float z) {
     return {-x, z, y};
+}
+
+// Expresses a console-frame vector in the same orientation in which the renderer displays the 3DS.
+Common::Vec3<float> OrientToLayout(const Common::Vec3<float>& vector,
+                                   Layout::DisplayOrientation orientation) {
+    switch (orientation) {
+    case Layout::DisplayOrientation::Portrait:
+        return {-vector.z, vector.y, vector.x};
+    case Layout::DisplayOrientation::LandscapeFlipped:
+        return {-vector.x, vector.y, -vector.z};
+    case Layout::DisplayOrientation::PortraitFlipped:
+        return {vector.z, vector.y, -vector.x};
+    case Layout::DisplayOrientation::Landscape:
+    default:
+        return vector;
+    }
 }
 
 void StoreMotion(const Common::Vec3<float>& accel, const Common::Vec3<float>& gyro) {
@@ -447,11 +464,26 @@ void UpdateInput(const InputState& state) {
     s_stick_y[Settings::NativeAnalog::CStick].store(right_pointer ? 0.0f : right_y,
                                                     std::memory_order_relaxed);
 
+    EmuWindow_Switch* window = GetEmuWindow();
+    Layout::DisplayOrientation orientation = Layout::DisplayOrientation::Landscape;
+    if (GetGyroOrientation() == GyroOrientation::Vertical) {
+        orientation = Layout::DisplayOrientation::Portrait;
+        if (window) {
+            const Layout::DisplayOrientation layout_orientation =
+                window->GetFramebufferLayout().GetOrientation();
+            if (layout_orientation != Layout::DisplayOrientation::Landscape) {
+                orientation = layout_orientation;
+            }
+        }
+    }
     if (state.motion.active) {
-        StoreMotion(
-            ToConsoleFrame(state.motion.accel_x, state.motion.accel_y, state.motion.accel_z),
-            ToConsoleFrame(state.motion.gyro_x, state.motion.gyro_y, state.motion.gyro_z) *
-                kRotationsToDegrees);
+        StoreMotion(OrientToLayout(ToConsoleFrame(state.motion.accel_x, state.motion.accel_y,
+                                                  state.motion.accel_z),
+                                   orientation),
+                    OrientToLayout(ToConsoleFrame(state.motion.gyro_x, state.motion.gyro_y,
+                                                  state.motion.gyro_z),
+                                   orientation) *
+                        kRotationsToDegrees);
     } else {
         StoreMotion(kRestAccel, {});
     }
@@ -462,7 +494,6 @@ void UpdateInput(const InputState& state) {
                        right_pointer ? right_y : left_y);
     }
 
-    EmuWindow_Switch* window = GetEmuWindow();
     if (!window) {
         s_touch_active = false;
         return;
@@ -562,6 +593,18 @@ void SetGyroSensitivity(int x_percent, int y_percent) {
                                std::memory_order_relaxed);
     s_gyro_sensitivity_y.store(std::clamp(y_percent, kGyroSensitivityMin, kGyroSensitivityMax),
                                std::memory_order_relaxed);
+}
+
+GyroOrientation GetGyroOrientation() {
+    return s_gyro_orientation.load(std::memory_order_relaxed);
+}
+
+void SetGyroOrientation(GyroOrientation orientation) {
+    s_gyro_orientation.store(orientation, std::memory_order_relaxed);
+}
+
+const char* GyroOrientationName(GyroOrientation orientation) {
+    return orientation == GyroOrientation::Vertical ? "Vertical" : "Horizontal (Default)";
 }
 
 bool IsPointerModeActive() {

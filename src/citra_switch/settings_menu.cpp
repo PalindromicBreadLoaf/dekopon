@@ -821,6 +821,15 @@ SettingsRow GyroSourceRow() {
             }};
 }
 
+SettingsRow GyroOrientationRow() {
+    return {"Gyro Orientation",
+            [] { return std::string{GyroOrientationName(GetGyroOrientation())}; },
+            [](int dir) {
+                SetGyroOrientation(static_cast<GyroOrientation>(std::clamp(
+                    static_cast<int>(GetGyroOrientation()) + dir, 0, NumGyroOrientations - 1)));
+            }};
+}
+
 // The screen arrangement rows the quick menu shows. These go through the frontend's steppers
 // rather than the settings directly, because those also queue the layout refresh.
 SettingsRow ScreenLayoutRow() {
@@ -1050,6 +1059,7 @@ std::vector<SettingsRow> BuildSettingsPage(SettingsPage page) {
             GyroSensitivityRow("Gyro Sensitivity X", true),
             GyroSensitivityRow("Gyro Sensitivity Y", false),
             GyroSourceRow(),
+            GyroOrientationRow(),
             Toggle("Use Artic Base Controller", v.use_artic_base_controller),
             {"Controller Mapping",
              [] { return std::string{"Configure"}; },
@@ -1164,6 +1174,7 @@ std::vector<SettingsRow> BuildQuickPage(QuickPage page) {
             GyroSensitivityRow("Gyro Sensitivity X", true),
             GyroSensitivityRow("Gyro Sensitivity Y", false),
             GyroSourceRow(),
+            GyroOrientationRow(),
         };
     default:
         return {
