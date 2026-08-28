@@ -218,6 +218,8 @@ endif()
 if (ENABLE_DEKO3D)
     target_sources(video_core PRIVATE
         renderer_deko3d/dk_common.h
+        renderer_deko3d/dk_display_switch.cpp
+        renderer_deko3d/dk_display_switch.h
         renderer_deko3d/dk_memory.cpp
         renderer_deko3d/dk_memory.h
         renderer_deko3d/dk_rasterizer.cpp
@@ -233,6 +235,9 @@ if (ENABLE_DEKO3D)
         renderer_deko3d/renderer_deko3d.h
         renderer_deko3d/uam_bridge.h
     )
+    set_source_files_properties(renderer_deko3d/dk_display_switch.cpp PROPERTIES
+        SKIP_PRECOMPILE_HEADERS ON)
+
     find_library(DEKO3D_LIBRARY NAMES deko3d PATHS "${DEVKITPRO}/libnx/lib" REQUIRED)
     target_link_libraries(video_core PRIVATE ${DEKO3D_LIBRARY})
 
