@@ -2,6 +2,7 @@
 // Copyright(c) 2026: PalindromicBreadLoaf(palindromicbreadloaf@tuta.com)
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cstddef>
@@ -9,13 +10,20 @@
 #include <cstring>
 #include <utility>
 #include <vector>
+#include <string>
+#include <fmt/format.h>
 #include "common/logging/log.h"
 #include "common/vector_math.h"
 #include "video_core/pica/pica_core.h"
 #include "video_core/renderer_deko3d/dk_common.h"
 #include "video_core/renderer_deko3d/dk_rasterizer.h"
+#include "video_core/renderer_deko3d/dk_shader_compiler.h"
 #include "video_core/renderer_deko3d/pica_to_dk.h"
+#include "video_core/shader/generator/glsl_fs_shader_gen.h"
+#include "video_core/shader/generator/glsl_shader_gen.h"
 #include "video_core/shader/generator/pica_fs_config.h"
+#include "video_core/shader/generator/shader_gen.h"
+#include "video_core/shader/generator/shader_uniforms.h"
 
 namespace Deko3D {
 
@@ -25,6 +33,9 @@ constexpr u32 CmdBufSize = 512 * 1024;
 constexpr u32 StreamBufferSize = 8 * 1024 * 1024;
 constexpr u32 UniformBufferSize = 1 * 1024 * 1024;
 constexpr u32 TextureBufferSize = 2 * 1024 * 1024;
+constexpr u32 ShaderCodeBlockSize = 1 * 1024 * 1024;
+
+using TextureType = Pica::TexturingRegs::TextureConfig::TextureType;
 
 using VideoCore::SurfaceType;
 
@@ -119,6 +130,14 @@ RasterizerDeko3D::RasterizerDeko3D(Memory::MemorySystem& memory, Pica::PicaCore&
     sampler_descriptor_set =
         image_descriptor_set + NumImageDescriptors * sizeof(DkImageDescriptor);
 
+    fs_profile = Pica::Shader::Profile{
+        .has_separable_shaders = true,
+        .has_blend_minmax_factor = true,
+        .has_minus_one_to_one_range = true,
+        .has_logic_op = true,
+        .is_vulkan = false,
+    };
+
     LoadUberShader();
     CreateNullResources();
     SetupStaticDescriptors();
@@ -137,6 +156,9 @@ RasterizerDeko3D::~RasterizerDeko3D() {
     }
     if (code_memblock != nullptr) {
         dkMemBlockDestroy(code_memblock);
+    }
+    for (DkMemBlock block : shader_code_arena) {
+        dkMemBlockDestroy(block);
     }
     if (cmdbuf != nullptr) {
         dkCmdBufDestroy(cmdbuf);
@@ -481,15 +503,281 @@ void RasterizerDeko3D::SyncAndUploadLUTs() {
     texture_buffer.Commit(static_cast<u32>(bytes_used));
 }
 
+bool RasterizerDeko3D::CanSpecialize(const Pica::Shader::FSConfig& config) {
+    // TODO: Cube/shadow tex0 and shadow-buffer rendering need image bindings the rasterizer doesn't wire
+    // up yet.
+    const auto texture0_type = config.texture.texture0_type.Value();
+    if (texture0_type == TextureType::TextureCube || texture0_type == TextureType::Shadow2D ||
+        texture0_type == TextureType::ShadowCube) {
+        return false;
+    }
+    return !config.framebuffer.shadow_rendering.Value();
+}
+
+bool RasterizerDeko3D::UploadShaderCode(const std::vector<u8>& dksh, DkShader& out) {
+    const u32 size = AlignUp(static_cast<u32>(dksh.size()), DK_SHADER_CODE_ALIGNMENT);
+    if (shader_code_block == nullptr || shader_code_head + size > shader_code_capacity) {
+        const u32 capacity = std::max(ShaderCodeBlockSize, AlignUp(size, DK_MEMBLOCK_ALIGNMENT));
+        DkMemBlockMaker maker;
+        dkMemBlockMakerDefaults(&maker, device, capacity);
+        maker.flags =
+            DkMemBlockFlags_CpuUncached | DkMemBlockFlags_GpuCached | DkMemBlockFlags_Code;
+        shader_code_block = dkMemBlockCreate(&maker);
+        if (shader_code_block == nullptr) {
+            return false;
+        }
+        shader_code_arena.push_back(shader_code_block);
+        shader_code_capacity = capacity;
+        shader_code_head = 0;
+    }
+
+    auto* const base = static_cast<u8*>(dkMemBlockGetCpuAddr(shader_code_block));
+    std::memcpy(base + shader_code_head, dksh.data(), dksh.size());
+    DkShaderMaker maker;
+    dkShaderMakerDefaults(&maker, shader_code_block, shader_code_head);
+    dkShaderInitialize(&out, &maker);
+    shader_code_head += size;
+    return true;
+}
+
+const DkShader* RasterizerDeko3D::GetFragmentShader() {
+    Pica::Shader::FSConfig fs_config{regs};
+    fs_config.Canonicalize(fs_profile);
+    if (!CanSpecialize(fs_config)) {
+        return nullptr;
+    }
+
+    const u64 hash = fs_config.Hash();
+    if (const auto it = fragment_shaders.find(hash); it != fragment_shaders.end()) {
+        return it->second ? &*it->second : nullptr;
+    }
+
+    const std::string name = fmt::format("fs_{:016x}", hash);
+    std::string source = "#version 460\n";
+    source += Pica::Shader::Generator::GLSL::GenerateFragmentShader(fs_config,
+                                                                    Pica::Shader::UserConfig{},
+                                                                    fs_profile);
+    const auto dksh =
+        ShaderCompiler::CompileShader(ShaderCompiler::Stage::Fragment, source, name);
+
+    DkShader shader{};
+    if (!dksh || !UploadShaderCode(*dksh, shader)) {
+        fragment_shaders.emplace(hash, std::nullopt);
+        return nullptr;
+    }
+    const auto result = fragment_shaders.emplace(hash, shader);
+    return &*result.first->second;
+}
+
+const DkShader* RasterizerDeko3D::GetVertexShader() {
+    namespace Generator = Pica::Shader::Generator;
+
+    Generator::PicaVSConfig config{regs, pica.vs_setup};
+    const u64 hash = config.Hash();
+    if (const auto it = vertex_shaders.find(hash); it != vertex_shaders.end()) {
+        return it->second ? &*it->second : nullptr;
+    }
+
+    Generator::ExtraVSConfig extra{};
+    extra.use_clip_planes = false;
+    extra.use_geometry_shader = false;
+    extra.sanitize_mul = false;
+    extra.separable_shader = true;
+    extra.load_flags.fill(Generator::AttribLoadFlags::Float);
+
+    const std::string body =
+        Generator::GLSL::GenerateVertexShader(pica.vs_setup, config, extra);
+
+    DkShader shader{};
+    if (body.empty()) {
+        vertex_shaders.emplace(hash, std::nullopt);
+        return nullptr;
+    }
+
+    const std::string name = fmt::format("vs_{:016x}", hash);
+    const std::string source = "#version 460\n" + body;
+    const auto dksh =
+        ShaderCompiler::CompileShader(ShaderCompiler::Stage::Vertex, source, name);
+    if (!dksh || !UploadShaderCode(*dksh, shader)) {
+        vertex_shaders.emplace(hash, std::nullopt);
+        return nullptr;
+    }
+    const auto result = vertex_shaders.emplace(hash, shader);
+    return &*result.first->second;
+}
+
+bool RasterizerDeko3D::SetupVertexArray() {
+    const auto& vertex_attributes = regs.pipeline.vertex_attributes;
+    const PAddr base_address = vertex_attributes.GetPhysicalBaseAddress();
+    const u32 vs_input_index_min = vertex_info.vs_input_index_min;
+    const u32 vertex_num = vertex_info.vs_input_index_max - vs_input_index_min + 1;
+
+    accel_binding_count = 0;
+    accel_enabled_attribs.fill(false);
+
+    for (const auto& loader : vertex_attributes.attribute_loaders) {
+        if (loader.component_count == 0 || loader.byte_count == 0) {
+            continue;
+        }
+        if (accel_binding_count >= MaxVertexBindings - 1) {
+            // Reserve the last binding for fixed/default attributes.
+            break;
+        }
+        const u32 binding = accel_binding_count;
+
+        u32 offset = 0;
+        for (u32 comp = 0; comp < loader.component_count && comp < 12; ++comp) {
+            const u32 attribute_index = loader.GetComponent(comp);
+            if (attribute_index >= 12) {
+                // 12..15 encode 4/8/12/16-byte paddings.
+                offset = AlignUp(offset, 4u);
+                offset += (attribute_index - 11) * 4;
+                continue;
+            }
+
+            const u32 size = vertex_attributes.GetNumElements(attribute_index);
+            if (size == 0) {
+                continue;
+            }
+            offset = AlignUp(offset, vertex_attributes.GetElementSizeInBytes(attribute_index));
+
+            const u32 input_reg = regs.vs.GetRegisterForAttribute(attribute_index);
+            const auto format = vertex_attributes.GetFormat(attribute_index);
+
+            accel_attribs[input_reg] = {binding,
+                                        0,
+                                        offset,
+                                        PicaToDk::VertexAttribSize(format, size),
+                                        PicaToDk::VertexAttribType(format),
+                                        0};
+            accel_enabled_attribs[input_reg] = true;
+            offset += vertex_attributes.GetStride(attribute_index);
+        }
+
+        const PAddr data_addr =
+            base_address + loader.data_offset + (vs_input_index_min * loader.byte_count);
+        const u32 data_size = loader.byte_count * vertex_num;
+        res_cache.FlushRegion(data_addr, data_size);
+
+        const auto src_ref = memory.GetPhysicalRef(data_addr);
+        if (!src_ref || src_ref.GetSize() < data_size) {
+            return false;
+        }
+
+        u32 buffer_offset = 0;
+        u8* dst = stream_buffer.Map(data_size, 4, buffer_offset);
+        std::memcpy(dst, src_ref.GetPtr(), data_size);
+        stream_buffer.Commit(data_size);
+
+        accel_buffers[binding] = {loader.byte_count, 0};
+        accel_buffer_addrs[binding] = stream_buffer.gpu_addr + buffer_offset;
+        accel_buffer_sizes[binding] = data_size;
+        ++accel_binding_count;
+    }
+
+    SetupFixedAttribs();
+    return true;
+}
+
+void RasterizerDeko3D::SetupFixedAttribs() {
+    const auto& vertex_attributes = regs.pipeline.vertex_attributes;
+    const u32 binding = accel_binding_count;
+
+    static constexpr Common::Vec4f default_attrib{0.f, 0.f, 0.f, 1.f};
+    const u32 max_bytes = 16 * static_cast<u32>(sizeof(Common::Vec4f));
+    u32 buffer_offset = 0;
+    u8* base = stream_buffer.Map(max_bytes, sizeof(Common::Vec4f), buffer_offset);
+    std::memcpy(base, default_attrib.AsArray(), sizeof(Common::Vec4f));
+
+    u32 offset = sizeof(Common::Vec4f);
+    for (u32 i = 0; i < 16; ++i) {
+        if (!vertex_attributes.IsDefaultAttribute(i)) {
+            continue;
+        }
+        const u32 reg = regs.vs.GetRegisterForAttribute(i);
+        if (accel_enabled_attribs[reg]) {
+            continue;
+        }
+        const auto& attr = pica.input_default_attributes[i];
+        const std::array data = {attr.x.ToFloat32(), attr.y.ToFloat32(), attr.z.ToFloat32(),
+                                 attr.w.ToFloat32()};
+        std::memcpy(base + offset, data.data(), sizeof(data));
+
+        accel_attribs[reg] = {binding, 0, offset, DkVtxAttribSize_4x32, DkVtxAttribType_Float, 0};
+        accel_enabled_attribs[reg] = true;
+        offset += static_cast<u32>(sizeof(data));
+    }
+
+    // Any attribute the shader might read but nothing provides reads the default value.
+    for (u32 i = 0; i < 16; ++i) {
+        if (!accel_enabled_attribs[i]) {
+            accel_attribs[i] = {binding, 0, 0, DkVtxAttribSize_4x32, DkVtxAttribType_Float, 0};
+        }
+    }
+
+    stream_buffer.Commit(offset);
+
+    accel_buffers[binding] = {offset, 1};
+    accel_buffer_addrs[binding] = stream_buffer.gpu_addr + buffer_offset;
+    accel_buffer_sizes[binding] = offset;
+    ++accel_binding_count;
+}
+
+void RasterizerDeko3D::SetupIndexArray() {
+    const bool index_u16 = regs.pipeline.index_array.format != 0;
+    const u32 index_size = index_u16 ? 2 : 1;
+    const u32 bytes = regs.pipeline.num_vertices * index_size;
+
+    const u8* src = memory.GetPhysicalPointer(
+        regs.pipeline.vertex_attributes.GetPhysicalBaseAddress() + regs.pipeline.index_array.offset);
+
+    u32 offset = 0;
+    u8* dst = stream_buffer.Map(bytes, 4, offset);
+    std::memcpy(dst, src, bytes);
+    stream_buffer.Commit(bytes);
+
+    accel_index_addr = stream_buffer.gpu_addr + offset;
+    accel_index_format = index_u16 ? DkIdxFormat_Uint16 : DkIdxFormat_Uint8;
+}
+
+bool RasterizerDeko3D::AccelerateDrawBatch(bool is_indexed) {
+    if (!shaders_ok || regs.pipeline.use_gs != Pica::PipelineRegs::UseGS::No) {
+        return false;
+    }
+    if (regs.pipeline.triangle_topology == Pica::PipelineRegs::TriangleTopology::Shader) {
+        return false;
+    }
+    accel_topology = PicaToDk::PrimitiveTopology(regs.pipeline.triangle_topology);
+
+    vertex_info = AnalyzeVertexArray(is_indexed, 1);
+    if (vertex_info.Invalid()) {
+        return true;
+    }
+
+    accel_vsh = GetVertexShader();
+    if (accel_vsh == nullptr) {
+        return false;
+    }
+    if (!SetupVertexArray()) {
+        return false;
+    }
+    if (is_indexed) {
+        SetupIndexArray();
+    }
+
+    Draw(true, is_indexed);
+    return true;
+}
+
 void RasterizerDeko3D::DrawTriangles() {
     if (vertex_batch.empty()) {
         return;
     }
-    Draw();
+    Draw(false, false);
     vertex_batch.clear();
 }
 
-void RasterizerDeko3D::Draw() {
+void RasterizerDeko3D::Draw(bool accelerate, bool is_indexed) {
     if (!shaders_ok) {
         return;
     }
@@ -533,9 +821,12 @@ void RasterizerDeko3D::Draw() {
     SyncAndUploadLUTs();
     SyncAndUploadLUTsLF();
 
-    // fs_config selector block
-    const Pica::Shader::FSConfig fs_config{regs};
-    const FSConfigUniformData fs_config_data = BuildFSConfigUniform(fs_config);
+    // A specialised fragment shader for this PICA state.
+    const DkShader* fsh = GetFragmentShader();
+    const bool use_uber = fsh == nullptr;
+    if (use_uber) {
+        fsh = &uber_fsh;
+    }
 
     const auto upload_uniform = [&](const void* data, u32 bytes) -> DkGpuAddr {
         const u32 aligned = AlignUp(bytes, DK_UNIFORM_BUF_ALIGNMENT);
@@ -545,18 +836,36 @@ void RasterizerDeko3D::Draw() {
         uniform_buffer.Commit(aligned);
         return uniform_buffer.gpu_addr + offset;
     };
-    const DkGpuAddr fs_config_addr = upload_uniform(&fs_config_data, sizeof(fs_config_data));
+    // The ubershader reads its configuration from the fs_config block. Specialised shaders bake it in.
+    DkGpuAddr fs_config_addr = 0;
+    if (use_uber) {
+        const Pica::Shader::FSConfig fs_config{regs};
+        const FSConfigUniformData fs_config_data = BuildFSConfigUniform(fs_config);
+        fs_config_addr = upload_uniform(&fs_config_data, sizeof(fs_config_data));
+    }
     const DkGpuAddr vs_data_addr = upload_uniform(&vs_data, sizeof(vs_data));
     const DkGpuAddr fs_data_addr = upload_uniform(&fs_data, sizeof(fs_data));
 
-    // Vertex batch.
-    const u32 vertex_count = static_cast<u32>(vertex_batch.size());
-    const u32 vertex_bytes = vertex_count * sizeof(HardwareVertex);
-    u32 vertex_offset = 0;
-    u8* vertex_ptr = stream_buffer.Map(vertex_bytes, sizeof(HardwareVertex), vertex_offset);
-    std::memcpy(vertex_ptr, vertex_batch.data(), vertex_bytes);
-    stream_buffer.Commit(vertex_bytes);
-    const DkGpuAddr vertex_addr = stream_buffer.gpu_addr + vertex_offset;
+    DkGpuAddr vs_pica_addr = 0;
+    if (accelerate) {
+        Pica::Shader::Generator::VSPicaUniformData vs_pica;
+        vs_pica.SetFromRegs(pica.vs_setup);
+        vs_pica_addr = upload_uniform(&vs_pica, sizeof(vs_pica));
+    }
+
+    // Software vertex batch
+    u32 vertex_count = 0;
+    u32 vertex_bytes = 0;
+    DkGpuAddr vertex_addr = 0;
+    if (!accelerate) {
+        vertex_count = static_cast<u32>(vertex_batch.size());
+        vertex_bytes = vertex_count * sizeof(HardwareVertex);
+        u32 vertex_offset = 0;
+        u8* vertex_ptr = stream_buffer.Map(vertex_bytes, sizeof(HardwareVertex), vertex_offset);
+        std::memcpy(vertex_ptr, vertex_batch.data(), vertex_bytes);
+        stream_buffer.Commit(vertex_bytes);
+        vertex_addr = stream_buffer.gpu_addr + vertex_offset;
+    }
 
     // Record
     DkCmdBuf cb = BeginCmd();
@@ -601,13 +910,21 @@ void RasterizerDeko3D::Draw() {
     const Common::Vec4f blend_rgba = PicaToDk::ColorRGBA8(blend_color);
     dkCmdBufSetBlendConst(cb, blend_rgba.r(), blend_rgba.g(), blend_rgba.b(), blend_rgba.a());
 
-    const DkShader* shaders[2] = {&uber_vsh, &uber_fsh};
+    const DkShader* vsh = accelerate ? accel_vsh : &uber_vsh;
+    const DkShader* shaders[2] = {vsh, fsh};
     dkCmdBufBindShaders(cb, DkStageFlag_GraphicsMask, shaders, 2);
 
     dkCmdBufBindUniformBuffer(cb, DkStage_Vertex, 1, vs_data_addr,
                               AlignUp(sizeof(vs_data), DK_UNIFORM_BUF_ALIGNMENT));
-    dkCmdBufBindUniformBuffer(cb, DkStage_Fragment, 0, fs_config_addr,
-                              AlignUp(sizeof(fs_config_data), DK_UNIFORM_BUF_ALIGNMENT));
+    if (accelerate) {
+        dkCmdBufBindUniformBuffer(
+            cb, DkStage_Vertex, 0, vs_pica_addr,
+            AlignUp(sizeof(Pica::Shader::Generator::VSPicaUniformData), DK_UNIFORM_BUF_ALIGNMENT));
+    }
+    if (use_uber) {
+        dkCmdBufBindUniformBuffer(cb, DkStage_Fragment, 0, fs_config_addr,
+                                  AlignUp(sizeof(FSConfigUniformData), DK_UNIFORM_BUF_ALIGNMENT));
+    }
     dkCmdBufBindUniformBuffer(cb, DkStage_Fragment, 2, fs_data_addr,
                               AlignUp(sizeof(fs_data), DK_UNIFORM_BUF_ALIGNMENT));
 
@@ -624,22 +941,39 @@ void RasterizerDeko3D::Draw() {
     };
     dkCmdBufBindTextures(cb, DkStage_Fragment, 0, handles.data(), handles.size());
 
-    static constexpr std::array<std::pair<u32, u32>, 8> attrib_layout = {{
-        {offsetof(HardwareVertex, position), 4},   {offsetof(HardwareVertex, color), 4},
-        {offsetof(HardwareVertex, tex_coord0), 2}, {offsetof(HardwareVertex, tex_coord1), 2},
-        {offsetof(HardwareVertex, tex_coord2), 2}, {offsetof(HardwareVertex, tex_coord0_w), 1},
-        {offsetof(HardwareVertex, normquat), 4},   {offsetof(HardwareVertex, view), 3},
-    }};
-    std::array<DkVtxAttribState, 8> attribs{};
-    for (u32 i = 0; i < attribs.size(); ++i) {
-        attribs[i] = {0, 0, attrib_layout[i].first, AttribSize(attrib_layout[i].second),
-                      DkVtxAttribType_Float, 0};
+    if (accelerate) {
+        std::array<DkBufExtents, MaxVertexBindings> extents{};
+        for (u32 i = 0; i < accel_binding_count; ++i) {
+            extents[i] = {accel_buffer_addrs[i], accel_buffer_sizes[i]};
+        }
+        dkCmdBufBindVtxAttribState(cb, accel_attribs.data(), accel_attribs.size());
+        dkCmdBufBindVtxBufferState(cb, accel_buffers.data(), accel_binding_count);
+        dkCmdBufBindVtxBuffers(cb, 0, extents.data(), accel_binding_count);
+        if (is_indexed) {
+            dkCmdBufBindIdxBuffer(cb, accel_index_format, accel_index_addr);
+            dkCmdBufDrawIndexed(cb, accel_topology, regs.pipeline.num_vertices, 1, 0,
+                                -static_cast<s32>(vertex_info.vs_input_index_min), 0);
+        } else {
+            dkCmdBufDraw(cb, accel_topology, regs.pipeline.num_vertices, 1, 0, 0);
+        }
+    } else {
+        static constexpr std::array<std::pair<u32, u32>, 8> attrib_layout = {{
+            {offsetof(HardwareVertex, position), 4},   {offsetof(HardwareVertex, color), 4},
+            {offsetof(HardwareVertex, tex_coord0), 2}, {offsetof(HardwareVertex, tex_coord1), 2},
+            {offsetof(HardwareVertex, tex_coord2), 2}, {offsetof(HardwareVertex, tex_coord0_w), 1},
+            {offsetof(HardwareVertex, normquat), 4},   {offsetof(HardwareVertex, view), 3},
+        }};
+        std::array<DkVtxAttribState, 8> attribs{};
+        for (u32 i = 0; i < attribs.size(); ++i) {
+            attribs[i] = {0, 0, attrib_layout[i].first, AttribSize(attrib_layout[i].second),
+                          DkVtxAttribType_Float, 0};
+        }
+        const DkVtxBufferState buffer_state = {sizeof(HardwareVertex), 0};
+        dkCmdBufBindVtxAttribState(cb, attribs.data(), attribs.size());
+        dkCmdBufBindVtxBufferState(cb, &buffer_state, 1);
+        dkCmdBufBindVtxBuffer(cb, 0, vertex_addr, vertex_bytes);
+        dkCmdBufDraw(cb, DkPrimitive_Triangles, vertex_count, 1, 0, 0);
     }
-    const DkVtxBufferState buffer_state = {sizeof(HardwareVertex), 0};
-    dkCmdBufBindVtxAttribState(cb, attribs.data(), attribs.size());
-    dkCmdBufBindVtxBufferState(cb, &buffer_state, 1);
-    dkCmdBufBindVtxBuffer(cb, 0, vertex_addr, vertex_bytes);
-    dkCmdBufDraw(cb, DkPrimitive_Triangles, vertex_count, 1, 0, 0);
 
     SubmitCmd();
 }

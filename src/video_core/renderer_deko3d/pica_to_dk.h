@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <deko3d.h>
 #include "common/vector_math.h"
@@ -126,6 +127,39 @@ inline DkFrontFace FrontFace(Pica::RasterizerRegs::CullMode mode) {
     default:
         return DkFrontFace_CCW;
     }
+}
+
+// Scaled/float type so the shader reads a raw PICA attribute as a vec4.
+inline DkVtxAttribType VertexAttribType(Pica::PipelineRegs::VertexAttributeFormat format) {
+    switch (format) {
+    case Pica::PipelineRegs::VertexAttributeFormat::BYTE:
+        return DkVtxAttribType_Sscaled;
+    case Pica::PipelineRegs::VertexAttributeFormat::UBYTE:
+        return DkVtxAttribType_Uscaled;
+    case Pica::PipelineRegs::VertexAttributeFormat::SHORT:
+        return DkVtxAttribType_Sscaled;
+    case Pica::PipelineRegs::VertexAttributeFormat::FLOAT:
+    default:
+        return DkVtxAttribType_Float;
+    }
+}
+
+inline DkVtxAttribSize VertexAttribSize(Pica::PipelineRegs::VertexAttributeFormat format,
+                                        u32 count) {
+    const u32 n = std::clamp(count, 1u, 4u);
+    if (format == Pica::PipelineRegs::VertexAttributeFormat::FLOAT) {
+        static constexpr std::array<DkVtxAttribSize, 4> sizes{
+            {DkVtxAttribSize_1x32, DkVtxAttribSize_2x32, DkVtxAttribSize_3x32, DkVtxAttribSize_4x32}};
+        return sizes[n - 1];
+    }
+    if (format == Pica::PipelineRegs::VertexAttributeFormat::SHORT) {
+        static constexpr std::array<DkVtxAttribSize, 4> sizes{
+            {DkVtxAttribSize_1x16, DkVtxAttribSize_2x16, DkVtxAttribSize_3x16, DkVtxAttribSize_4x16}};
+        return sizes[n - 1];
+    }
+    static constexpr std::array<DkVtxAttribSize, 4> sizes{
+        {DkVtxAttribSize_1x8, DkVtxAttribSize_2x8, DkVtxAttribSize_3x8, DkVtxAttribSize_4x8}};
+    return sizes[n - 1];
 }
 
 inline DkPrimitive PrimitiveTopology(Pica::PipelineRegs::TriangleTopology topology) {

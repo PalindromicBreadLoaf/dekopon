@@ -5,10 +5,14 @@
 #pragma once
 
 #include <array>
+#include <optional>
+#include <unordered_map>
+#include <vector>
 #include <deko3d.h>
 #include "video_core/rasterizer_accelerated.h"
 #include "video_core/renderer_deko3d/dk_shader.h"
 #include "video_core/renderer_deko3d/dk_texture_runtime.h"
+#include "video_core/shader/generator/profile.h"
 
 namespace Memory {
 class MemorySystem;
@@ -16,6 +20,10 @@ class MemorySystem;
 
 namespace Pica {
 class PicaCore;
+}
+
+namespace Pica::Shader {
+struct FSConfig;
 }
 
 namespace VideoCore {
@@ -37,6 +45,7 @@ public:
     void TickFrame();
 
     void DrawTriangles() override;
+    bool AccelerateDrawBatch(bool is_indexed) override;
     void FlushAll() override;
     void FlushRegion(PAddr addr, u32 size) override;
     void InvalidateRegion(PAddr addr, u32 size) override;
@@ -64,11 +73,27 @@ private:
     void LoadUberShader();
     void CreateNullResources();
 
+    /// Returns the specialised fragment shader for the current PICA state.
+    const DkShader* GetFragmentShader();
+    /// Decompiles the current PICA vertex shader to a DKSH.
+    const DkShader* GetVertexShader();
+    /// Bump-allocates a DKSH blob into the code arena and initialises `out`.
+    bool UploadShaderCode(const std::vector<u8>& dksh, DkShader& out);
+    /// Whether the generated fragment shader only touches bindings the rasterizer already provides.
+    static bool CanSpecialize(const Pica::Shader::FSConfig& config);
+
+    /// Streams the raw PICA vertex arrays and builds the deko3d attribute/buffer state.
+    bool SetupVertexArray();
+    /// Assigns fixed/default values to attributes not sourced from a loader.
+    void SetupFixedAttribs();
+    /// Streams the index array for an accelerated indexed draw.
+    void SetupIndexArray();
+
     /// Records the immutable LUT buffer-texture and sampler descriptors once.
     void SetupStaticDescriptors();
 
-    /// Syncs state, binds the ubershader and issues the batch.
-    void Draw();
+    /// Syncs state, binds the shaders and issues the batch.
+    void Draw(bool accelerate, bool is_indexed);
     /// Fills the fixed-function state objects from PICA registers.
     void SyncFixedState();
     /// Binds the three PICA texture units into the descriptor set.
@@ -95,6 +120,30 @@ private:
     DkShader uber_vsh{};
     DkShader uber_fsh{};
     bool shaders_ok = false;
+
+    Pica::Shader::Profile fs_profile{};
+    // Specialised fragment shaders keyed by canonical FSConfig hash.
+    std::unordered_map<u64, std::optional<DkShader>> fragment_shaders;
+    // Decompiled vertex shaders keyed by PicaVSConfig hash.
+    std::unordered_map<u64, std::optional<DkShader>> vertex_shaders;
+    std::vector<DkMemBlock> shader_code_arena;
+    DkMemBlock shader_code_block = nullptr;
+    u32 shader_code_capacity = 0;
+    u32 shader_code_head = 0;
+
+    // Accelerated draw scratch state
+    static constexpr u32 MaxVertexBindings = 16;
+    VertexArrayInfo vertex_info{};
+    const DkShader* accel_vsh = nullptr;
+    DkPrimitive accel_topology = DkPrimitive_Triangles;
+    std::array<DkVtxAttribState, 16> accel_attribs{};
+    std::array<DkVtxBufferState, MaxVertexBindings> accel_buffers{};
+    std::array<DkGpuAddr, MaxVertexBindings> accel_buffer_addrs{};
+    std::array<u32, MaxVertexBindings> accel_buffer_sizes{};
+    std::array<bool, 16> accel_enabled_attribs{};
+    u32 accel_binding_count = 0;
+    DkGpuAddr accel_index_addr = 0;
+    DkIdxFormat accel_index_format = DkIdxFormat_Uint16;
 
     StreamBuffer stream_buffer;     /// Vertex data
     StreamBuffer uniform_buffer;    /// fs_config / vs_data / fs_data
