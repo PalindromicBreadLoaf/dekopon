@@ -14,6 +14,7 @@
 #include "video_core/pica/pica_core.h"
 #include "video_core/pica/regs_external.h"
 #include "video_core/pica/regs_lcd.h"
+#include "video_core/renderer_deko3d/dk_shader_compiler.h"
 #include "video_core/renderer_deko3d/renderer_deko3d.h"
 
 namespace Deko3D {
@@ -38,6 +39,22 @@ struct PresentVertex {
     float position[2];
     float tex_coord[2];
 };
+
+// Check for the uam runtime compiler.
+void UamSelfTest() {
+    static constexpr char kSource[] = R"(#version 460
+        layout(location = 0) out vec4 out_color;
+        layout(std140, binding = 0) uniform Block { vec4 tint; };
+        void main() { out_color = tint; }
+    )";
+    const auto blob =
+        ShaderCompiler::CompileShader(ShaderCompiler::Stage::Fragment, kSource, "uam_selftest");
+    if (blob) {
+        LOG_INFO(Render, "deko3d: uam runtime compiler online ({} byte DKSH)", blob->size());
+    } else {
+        LOG_ERROR(Render, "deko3d: uam runtime compiler self-test FAILED");
+    }
+}
 
 /// Decodes one row of a 3DS framebuffer into RGBA8.
 void DecodeRow(Pica::PixelFormat format, const u8* src, u8* dst, u32 width) {
@@ -173,6 +190,8 @@ void RendererDeko3D::InitDeko3D(void* native_window) {
     initialized = true;
     LOG_INFO(Render, "deko3d device initialized ({}x{}, {} framebuffers, shaders={})", fb_width,
              fb_height, NumFramebuffers, shaders_ok);
+
+    UamSelfTest();
 }
 
 bool RendererDeko3D::LoadShaders() {

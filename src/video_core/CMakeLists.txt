@@ -225,13 +225,20 @@ if (ENABLE_DEKO3D)
         renderer_deko3d/dk_rasterizer_cache.cpp
         renderer_deko3d/dk_shader.cpp
         renderer_deko3d/dk_shader.h
+        renderer_deko3d/dk_shader_compiler.cpp
+        renderer_deko3d/dk_shader_compiler.h
         renderer_deko3d/dk_texture_runtime.cpp
         renderer_deko3d/dk_texture_runtime.h
         renderer_deko3d/renderer_deko3d.cpp
         renderer_deko3d/renderer_deko3d.h
+        renderer_deko3d/uam_bridge.h
     )
     find_library(DEKO3D_LIBRARY NAMES deko3d PATHS "${DEVKITPRO}/libnx/lib" REQUIRED)
     target_link_libraries(video_core PRIVATE ${DEKO3D_LIBRARY})
+
+    # Runtime GLSL->DKSH shader compiler.
+    include(Uam)
+    target_link_libraries(video_core PRIVATE uam)
 endif()
 
 if(ENABLE_SDL2)
