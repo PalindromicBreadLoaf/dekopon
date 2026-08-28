@@ -231,6 +231,7 @@ if (ENABLE_DEKO3D)
         renderer_deko3d/dk_shader_compiler.h
         renderer_deko3d/dk_texture_runtime.cpp
         renderer_deko3d/dk_texture_runtime.h
+        renderer_deko3d/pica_to_dk.h
         renderer_deko3d/renderer_deko3d.cpp
         renderer_deko3d/renderer_deko3d.h
         renderer_deko3d/uam_bridge.h

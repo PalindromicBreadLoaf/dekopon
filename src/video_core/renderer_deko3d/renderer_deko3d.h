@@ -5,10 +5,12 @@
 #pragma once
 
 #include <array>
+#include <memory>
 #include "common/math_util.h"
 #include "video_core/renderer_base.h"
 #include "video_core/renderer_deko3d/dk_common.h"
 #include "video_core/renderer_deko3d/dk_rasterizer.h"
+#include "video_core/renderer_deko3d/dk_texture_runtime.h"
 
 namespace Core {
 class System;
@@ -48,7 +50,7 @@ public:
     ~RendererDeko3D() override;
 
     [[nodiscard]] VideoCore::RasterizerInterface* Rasterizer() override {
-        return &rasterizer;
+        return rasterizer.get();
     }
 
     void SwapBuffers() override;
@@ -112,7 +114,8 @@ private:
 
 private:
     Pica::PicaCore& pica;
-    RasterizerDeko3D rasterizer;
+    std::unique_ptr<TextureRuntime> runtime;
+    std::unique_ptr<RasterizerDeko3D> rasterizer;
 
     bool initialized = false;
     void* native_window = nullptr;

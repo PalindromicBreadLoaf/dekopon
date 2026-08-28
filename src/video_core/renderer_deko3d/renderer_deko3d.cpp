@@ -89,8 +89,7 @@ void DecodeRow(Pica::PixelFormat format, const u8* src, u8* dst, u32 width) {
 
 RendererDeko3D::RendererDeko3D(Core::System& system, Pica::PicaCore& pica_,
                                Frontend::EmuWindow& window, Frontend::EmuWindow* secondary_window)
-    : VideoCore::RendererBase{system, window, secondary_window}, pica{pica_},
-      rasterizer{system.Memory(), pica} {
+    : VideoCore::RendererBase{system, window, secondary_window}, pica{pica_} {
     // Deko3D stores the opaque nwindow here.
     void* window_handle = window.GetWindowInfo().render_surface;
     if (window_handle == nullptr) {
@@ -160,6 +159,11 @@ void RendererDeko3D::InitDeko3D(void* window_handle) {
         LOG_ERROR(Render, "deko3d: present shaders unavailable. Things will be broken.");
     }
     SetupSampler();
+
+    runtime = std::make_unique<TextureRuntime>(device, queue);
+    rasterizer = std::make_unique<RasterizerDeko3D>(system.Memory(), pica,
+                                                    system.CustomTexManager(), *this, device, queue,
+                                                    *runtime);
 
     render_window.UpdateCurrentFramebufferLayout(fb_width, fb_height);
 
@@ -391,7 +395,7 @@ void RendererDeko3D::UploadScreen(FrameContext& frame, ScreenTexture& screen,
         staging[3] = 255;
     } else {
         // Lets the rasterizer flush GPU-rendered output first.
-        rasterizer.FlushRegion(framebuffer_addr, framebuffer.stride * height);
+        rasterizer->FlushRegion(framebuffer_addr, framebuffer.stride * height);
         const u8* fb_data = system.Memory().GetPhysicalPointer(framebuffer_addr);
         if (fb_data == nullptr) {
             screen.valid = false;
@@ -540,6 +544,10 @@ void RendererDeko3D::SwapBuffers() {
 
     UpdateDisplayMode();
 
+    if (rasterizer) {
+        rasterizer->TickFrame();
+    }
+
     frame_index = (frame_index + 1) % NumFramesInFlight;
     FrameContext& frame = frames[frame_index];
     if (frame.fence_pending) {
@@ -565,6 +573,8 @@ void RendererDeko3D::ExitDeko3D() {
     if (queue != nullptr) {
         dkQueueWaitIdle(queue);
     }
+    rasterizer.reset();
+    runtime.reset();
     for (auto& frame : frames) {
         for (auto& screen : frame.screens) {
             if (screen.memblock != nullptr) {
