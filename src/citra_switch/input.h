@@ -99,6 +99,25 @@ enum class PointerSource : std::uint8_t {
 
 inline constexpr int NumPointerSources = static_cast<int>(PointerSource::Count);
 
+// Which physical motion sensor drives the emulated 3DS sensors.
+enum class GyroSource : std::uint8_t {
+    Automatic,
+    LeftController,
+    RightController,
+    Console,
+    Count,
+};
+
+inline constexpr int NumGyroSources = static_cast<int>(GyroSource::Count);
+
+enum class GyroOrientation : std::uint8_t {
+    Horizontal,
+    Vertical,
+    Count,
+};
+
+inline constexpr int NumGyroOrientations = static_cast<int>(GyroOrientation::Count);
+
 // The bottom-screen pointer position as a fraction of the bottom screen, for the crosshair.
 struct PointerCursor {
     bool active{};
@@ -144,10 +163,18 @@ void SetPointerSource(PointerSource source);
 // Display name of a pointer driver.
 const char* PointerSourceName(PointerSource source);
 
+GyroSource GetGyroSource();
+void SetGyroSource(GyroSource source);
+const char* GyroSourceName(GyroSource source);
+
 // Per-axis gyro pointer sensitivity as a percentage of the default speed (100 = default).
 int GetGyroSensitivityX();
 int GetGyroSensitivityY();
 void SetGyroSensitivity(int x_percent, int y_percent);
+
+GyroOrientation GetGyroOrientation();
+void SetGyroOrientation(GyroOrientation orientation);
+const char* GyroOrientationName(GyroOrientation orientation);
 
 // Pointer mode lets the stick/gyro drive the 3DS touchscreen with ZL/ZR as the tap.
 bool IsPointerModeActive();

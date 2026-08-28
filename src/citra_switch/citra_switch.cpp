@@ -43,45 +43,114 @@ constexpr std::array<std::pair<u64, SwitchFrontend::InputButton>, 16> button_map
     {HidNpadButton_StickR, SwitchFrontend::InputButton::R3},
 }};
 
-// Each controller style reports its six-axis sensor through a handle of its own.
-// Sideways Joy-Con is disabled because it's more work and I don't see a big need for it.
-std::array<HidSixAxisSensorHandle, 4> six_axis_handles{};
+constexpr std::size_t kHandheldSensor = 0;
+constexpr std::size_t kFullKeySensor = 1;
+constexpr std::size_t kJoyDualLeftSensor = 2;
+constexpr std::size_t kJoyDualRightSensor = 3;
+constexpr std::size_t kJoyLeftSensor = 4;
+constexpr std::size_t kJoyRightSensor = 5;
+std::array<HidSixAxisSensorHandle, 6> six_axis_handles{};
+bool seven_six_axis_initialized{};
+bool seven_six_axis_started{};
 
 void StartSixAxis() {
-    hidGetSixAxisSensorHandles(&six_axis_handles[0], 1, HidNpadIdType_Handheld,
+    hidGetSixAxisSensorHandles(&six_axis_handles[kHandheldSensor], 1, HidNpadIdType_Handheld,
                                HidNpadStyleTag_NpadHandheld);
-    hidGetSixAxisSensorHandles(&six_axis_handles[1], 1, HidNpadIdType_No1,
+    hidGetSixAxisSensorHandles(&six_axis_handles[kFullKeySensor], 1, HidNpadIdType_No1,
                                HidNpadStyleTag_NpadFullKey);
-    hidGetSixAxisSensorHandles(&six_axis_handles[2], 2, HidNpadIdType_No1,
+    hidGetSixAxisSensorHandles(&six_axis_handles[kJoyDualLeftSensor], 2, HidNpadIdType_No1,
                                HidNpadStyleTag_NpadJoyDual);
+    hidGetSixAxisSensorHandles(&six_axis_handles[kJoyLeftSensor], 1, HidNpadIdType_No1,
+                               HidNpadStyleTag_NpadJoyLeft);
+    hidGetSixAxisSensorHandles(&six_axis_handles[kJoyRightSensor], 1, HidNpadIdType_No1,
+                               HidNpadStyleTag_NpadJoyRight);
     for (const HidSixAxisSensorHandle& handle : six_axis_handles) {
         hidStartSixAxisSensor(handle);
+    }
+
+    seven_six_axis_initialized = R_SUCCEEDED(hidInitializeSevenSixAxisSensor());
+    if (seven_six_axis_initialized) {
+        seven_six_axis_started = R_SUCCEEDED(hidStartSevenSixAxisSensor());
     }
 }
 
 void StopSixAxis() {
+    if (seven_six_axis_started) {
+        hidStopSevenSixAxisSensor();
+        seven_six_axis_started = false;
+    }
+    if (seven_six_axis_initialized) {
+        hidFinalizeSevenSixAxisSensor();
+        seven_six_axis_initialized = false;
+    }
     for (const HidSixAxisSensorHandle& handle : six_axis_handles) {
         hidStopSixAxisSensor(handle);
     }
 }
 
+SwitchFrontend::MotionState ReadSevenSixAxis() {
+    if (!seven_six_axis_started) {
+        return {};
+    }
+
+    HidSevenSixAxisSensorState sensor{};
+    std::size_t count{};
+    if (R_FAILED(hidGetSevenSixAxisSensorStates(&sensor, 1, &count)) || count == 0) {
+        return {};
+    }
+
+    // Un-named libnx values that  map to acceleration, angular velocity, and orientation.
+    return {
+        .active = true,
+        .accel_x = sensor.unk_x18[0],
+        .accel_y = sensor.unk_x18[1],
+        .accel_z = sensor.unk_x18[2],
+        .gyro_x = sensor.unk_x18[3],
+        .gyro_y = sensor.unk_x18[4],
+        .gyro_z = sensor.unk_x18[5],
+    };
+}
+
 SwitchFrontend::MotionState PollMotion(PadState& pad) {
+    const SwitchFrontend::GyroSource source = SwitchFrontend::GetGyroSource();
+    if (source == SwitchFrontend::GyroSource::Console) {
+        return ReadSevenSixAxis();
+    }
+
     const u64 style_set = padGetStyleSet(&pad);
+    // Some compatible Joy-Cons leave the Handheld motion data empty so give them (and old
+    // firmwares), a fallback path.
+    if ((style_set & HidNpadStyleTag_NpadHandheld) != 0 &&
+        source == SwitchFrontend::GyroSource::Automatic) {
+        const SwitchFrontend::MotionState motion = ReadSevenSixAxis();
+        if (motion.active) {
+            return motion;
+        }
+    }
+
     HidSixAxisSensorState sensor{};
     bool read = false;
 
     if ((style_set & HidNpadStyleTag_NpadHandheld) != 0) {
-        read = hidGetSixAxisSensorStates(six_axis_handles[0], &sensor, 1) > 0;
+        read = hidGetSixAxisSensorStates(six_axis_handles[kHandheldSensor], &sensor, 1) > 0;
     } else if ((style_set & HidNpadStyleTag_NpadFullKey) != 0) {
-        read = hidGetSixAxisSensorStates(six_axis_handles[1], &sensor, 1) > 0;
+        read = hidGetSixAxisSensorStates(six_axis_handles[kFullKeySensor], &sensor, 1) > 0;
     } else if ((style_set & HidNpadStyleTag_NpadJoyDual) != 0) {
-        // A dual pair reports through whichever Joy-Con is actually attached.
         const u64 attributes = padGetAttributes(&pad);
-        if ((attributes & HidNpadAttribute_IsLeftConnected) != 0) {
-            read = hidGetSixAxisSensorStates(six_axis_handles[2], &sensor, 1) > 0;
-        } else if ((attributes & HidNpadAttribute_IsRightConnected) != 0) {
-            read = hidGetSixAxisSensorStates(six_axis_handles[3], &sensor, 1) > 0;
+        const bool left_connected = (attributes & HidNpadAttribute_IsLeftConnected) != 0;
+        const bool right_connected = (attributes & HidNpadAttribute_IsRightConnected) != 0;
+        if (source != SwitchFrontend::GyroSource::RightController && left_connected) {
+            read = hidGetSixAxisSensorStates(six_axis_handles[kJoyDualLeftSensor], &sensor, 1) > 0;
         }
+        if (!read && source != SwitchFrontend::GyroSource::LeftController && right_connected) {
+            read = hidGetSixAxisSensorStates(six_axis_handles[kJoyDualRightSensor], &sensor, 1) > 0;
+        }
+    } else if ((style_set & HidNpadStyleTag_NpadJoyLeft) != 0 &&
+               source != SwitchFrontend::GyroSource::RightController) {
+        read = hidGetSixAxisSensorStates(six_axis_handles[kJoyLeftSensor], &sensor, 1) > 0;
+    } else if ((style_set & HidNpadStyleTag_NpadJoyRight) != 0 &&
+               source != SwitchFrontend::GyroSource::LeftController) {
+        read = hidGetSixAxisSensorStates(six_axis_handles[kJoyRightSensor], &sensor, 1) > 0;
     }
 
     if (!read) {
