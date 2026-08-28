@@ -221,13 +221,17 @@ if (DEKOPON)
     set(ENABLE_LTO ON CACHE BOOL "Enabled for Switch")
 
     set(ENABLE_SOFTWARE_RENDERER ON CACHE BOOL "Kept for accuracy checks" FORCE)
-    set(ENABLE_VULKAN ON CACHE BOOL "Vulkan via NXVK" FORCE)
-    set(ENABLE_DEKO3D OFF CACHE BOOL "Superseded by NXVK" FORCE)
-    # NXVK and the switch-mesa GLES driver are two separate Mesa builds and cannot coexist
-    if (ENABLE_VULKAN)
-        set(ENABLE_OPENGL OFF CACHE BOOL "switch-mesa GLES conflicts with NXVK" FORCE)
+
+    if (ENABLE_DEKO3D)
+        set(ENABLE_VULKAN OFF CACHE BOOL "Superseded by Deko3D" FORCE)
+        set(ENABLE_OPENGL OFF CACHE BOOL "Superseded by Deko3D" FORCE)
     else()
-        set(ENABLE_OPENGL ON CACHE BOOL "GLES bring-up path (NXVK disabled)" FORCE)
+        set(ENABLE_VULKAN ON CACHE BOOL "Vulkan via NXVK" FORCE)
+        if (ENABLE_VULKAN)
+            set(ENABLE_OPENGL OFF CACHE BOOL "switch-mesa GLES conflicts with NXVK" FORCE)
+        else()
+            set(ENABLE_OPENGL ON CACHE BOOL "CURRENTLY BROKEN PLEASE DONT USE" FORCE)
+        endif()
     endif()
 
     # Source-level platform define for #ifdef __SWITCH__

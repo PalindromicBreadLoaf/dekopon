@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <vector>
 #include "common/color.h"
 #include "common/logging/log.h"
 #include "core/core.h"
@@ -19,8 +20,6 @@ namespace Deko3D {
 
 namespace {
 constexpr u32 CmdBufMemorySize = 256 * 1024;
-// Shader code blob storage.
-constexpr u32 CodeMemorySize = 64 * 1024;
 // CPU-visible scratch the LCD framebuffers are decoded into before the copy.
 constexpr u32 StagingMemorySize = 2 * 1024 * 1024;
 constexpr u32 VertexMemorySize = 64 * 1024;
@@ -177,20 +176,25 @@ void RendererDeko3D::InitDeko3D(void* native_window) {
 }
 
 bool RendererDeko3D::LoadShaders() {
-    DkMemBlockMaker memblock_maker;
-    dkMemBlockMakerDefaults(&memblock_maker, device, CodeMemorySize);
-    memblock_maker.flags =
-        DkMemBlockFlags_CpuUncached | DkMemBlockFlags_GpuCached | DkMemBlockFlags_Code;
-    code_memblock = dkMemBlockCreate(&memblock_maker);
-    if (code_memblock == nullptr) {
-        return false;
-    }
+    struct ShaderSpec {
+        DkShader& shader;
+        const char* path;
+    };
+    const std::array<ShaderSpec, 2> specs{{
+        {present_vsh, "romfs:/shaders/present_vsh.dksh"},
+        {present_fsh, "romfs:/shaders/present_fsh.dksh"},
+    }};
 
-    u32 code_offset = 0;
-    const auto load_one = [&](DkShader& shader, const char* path) -> bool {
-        std::FILE* file = std::fopen(path, "rb");
+    struct LoadedBlob {
+        std::vector<u8> data;
+        u32 offset;
+    };
+    std::array<LoadedBlob, specs.size()> blobs{};
+    u32 total_size = 0;
+    for (std::size_t i = 0; i < specs.size(); ++i) {
+        std::FILE* file = std::fopen(specs[i].path, "rb");
         if (file == nullptr) {
-            LOG_ERROR(Render, "deko3d: could not open shader {}", path);
+            LOG_ERROR(Render, "deko3d: could not open shader {}", specs[i].path);
             return false;
         }
         std::fseek(file, 0, SEEK_END);
@@ -200,30 +204,35 @@ bool RendererDeko3D::LoadShaders() {
             std::fclose(file);
             return false;
         }
-
-        const u32 offset = code_offset;
-        code_offset += AlignUp(static_cast<u32>(size), DK_SHADER_CODE_ALIGNMENT);
-        if (code_offset > CodeMemorySize) {
-            std::fclose(file);
-            LOG_ERROR(Render, "deko3d: code memblock too small for {}", path);
-            return false;
-        }
-
-        void* dst = static_cast<u8*>(dkMemBlockGetCpuAddr(code_memblock)) + offset;
-        const std::size_t read = std::fread(dst, 1, static_cast<std::size_t>(size), file);
+        blobs[i].data.resize(static_cast<std::size_t>(size));
+        const std::size_t read =
+            std::fread(blobs[i].data.data(), 1, static_cast<std::size_t>(size), file);
         std::fclose(file);
         if (read != static_cast<std::size_t>(size)) {
             return false;
         }
+        blobs[i].offset = total_size;
+        total_size += AlignUp(static_cast<u32>(size), DK_SHADER_CODE_ALIGNMENT);
+    }
 
+    const u32 code_size = AlignUp(total_size, DK_MEMBLOCK_ALIGNMENT);
+    DkMemBlockMaker memblock_maker;
+    dkMemBlockMakerDefaults(&memblock_maker, device, code_size);
+    memblock_maker.flags =
+        DkMemBlockFlags_CpuUncached | DkMemBlockFlags_GpuCached | DkMemBlockFlags_Code;
+    code_memblock = dkMemBlockCreate(&memblock_maker);
+    if (code_memblock == nullptr) {
+        return false;
+    }
+
+    u8* const code_base = static_cast<u8*>(dkMemBlockGetCpuAddr(code_memblock));
+    for (std::size_t i = 0; i < specs.size(); ++i) {
+        std::memcpy(code_base + blobs[i].offset, blobs[i].data.data(), blobs[i].data.size());
         DkShaderMaker shader_maker;
-        dkShaderMakerDefaults(&shader_maker, code_memblock, offset);
-        dkShaderInitialize(&shader, &shader_maker);
-        return true;
-    };
-
-    return load_one(present_vsh, "romfs:/shaders/present_vsh.dksh") &&
-           load_one(present_fsh, "romfs:/shaders/present_fsh.dksh");
+        dkShaderMakerDefaults(&shader_maker, code_memblock, blobs[i].offset);
+        dkShaderInitialize(&specs[i].shader, &shader_maker);
+    }
+    return true;
 }
 
 void RendererDeko3D::SetupSampler() {

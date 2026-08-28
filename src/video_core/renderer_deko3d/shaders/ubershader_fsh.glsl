@@ -13,7 +13,7 @@
 // Host depth-clip convention
 #define DEPTH_MINUS_ONE_TO_ONE 1
 
-Matches FSUniformData in shader/generator/shader_uniforms.h.
+// Matches FSUniformData in shader/generator/shader_uniforms.h.
 struct LightSrc {
     vec3 specular_0;
     vec3 specular_1;

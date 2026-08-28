@@ -45,6 +45,10 @@ add_executable(citra_switch
     usb_storage.h
 )
 
+if (NOT ENABLE_VULKAN)
+    target_sources(citra_switch PRIVATE horizon_libc_compat.cpp)
+endif()
+
 # oaknut_horizon_jit is pulled in transitively via oaknut
 target_link_libraries(citra_switch PRIVATE citra_core citra_common inih usbhsfs)
 
