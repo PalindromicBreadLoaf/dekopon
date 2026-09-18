@@ -357,6 +357,46 @@ void PresentWindow::NotifySurfaceChanged() {
 #endif
 }
 
+#ifdef ENABLE_LSFG
+void PresentWindow::UpdateFrameGeneration(u32 width, u32 height) {
+    if (!Settings::values.use_frame_generation.GetValue()) {
+        lsfg_bridge.reset();
+        lsfg_attempted = false;
+        return;
+    }
+
+    if (lsfg_attempted && lsfg_width == width && lsfg_height == height) {
+        return;
+    }
+
+    lsfg_bridge.reset();
+    lsfg_attempted = true;
+    lsfg_width = width;
+    lsfg_height = height;
+
+    const vk::Format format = swapchain.GetSurfaceFormat().format;
+    if (format != vk::Format::eR8G8B8A8Unorm) {
+        LOG_WARNING(Render_Vulkan,
+                    "Frame generation runs on R8G8B8A8_UNORM but the swapchain is {}",
+                    vk::to_string(format));
+    }
+
+    const LsfgBridgeInfo info{
+        .instance = instance.GetInstance(),
+        .physical_device = instance.GetPhysicalDevice(),
+        .device = instance.GetDevice(),
+        .queue = graphics_queue,
+        .queue_family_index = instance.GetGraphicsQueueFamilyIndex(),
+        .width = width,
+        .height = height,
+        .flow_scale =
+            static_cast<float>(Settings::values.frame_generation_flow_scale.GetValue()) / 100.0f,
+        .performance_mode = Settings::values.frame_generation_performance_mode.GetValue(),
+    };
+    lsfg_bridge = CreateLsfgBridge(info);
+}
+#endif
+
 void PresentWindow::CopyToSwapchain(Frame* frame) {
     const auto recreate_swapchain = [&] {
 #ifdef ANDROID
@@ -380,6 +420,10 @@ void PresentWindow::CopyToSwapchain(Frame* frame) {
         vsync_enabled = use_vsync;
         recreate_swapchain();
     }
+#endif
+
+#ifdef ENABLE_LSFG
+    UpdateFrameGeneration(frame->width, frame->height);
 #endif
 
     while (!swapchain.AcquireNextImage()) {

@@ -29,6 +29,9 @@
 #include "core/hle/service/cfg/cfg.h"
 #include "core/hle/service/ptm/ptm.h"
 #include "core/hw/unique_data.h"
+#ifdef ENABLE_LSFG
+#include "video_core/renderer_vulkan/vk_lsfg.h"
+#endif
 
 namespace SwitchFrontend {
 
@@ -482,6 +485,14 @@ SettingsRow ColorChannel(const char* label, Settings::SwitchableSetting<float>& 
                     255.0f;
             }};
 }
+
+#ifdef ENABLE_LSFG
+SettingsRow LosslessDllRow() {
+    const bool present = Vulkan::IsLsfgShaderDllPresent();
+    return {"Lossless.dll", [present] { return std::string{present ? "Found" : "Missing"}; },
+            [](int) {}};
+}
+#endif
 
 SettingsRow GraphicsApiRow() {
     auto& setting = Settings::values.graphics_api;
@@ -1000,6 +1011,12 @@ std::vector<SettingsRow> BuildSettingsPage(SettingsPage page) {
             Toggle("VSync", v.use_vsync),
             Toggle("Detect Display Refresh Rate", v.use_display_refresh_rate_detection),
             Toggle("Skip Duplicate Frames", v.use_skip_duplicate_frames),
+#ifdef ENABLE_LSFG
+            Toggle("Frame Generation", v.use_frame_generation),
+            LosslessDllRow(),
+            Toggle("Frame Gen Performance Mode", v.frame_generation_performance_mode),
+            Number("Frame Gen Flow Scale", v.frame_generation_flow_scale, 12, 100, 1, "%"),
+#endif
             Toggle("SPIR-V Shader Generation", v.spirv_shader_gen),
             Toggle("Disable SPIR-V Optimizer", v.disable_spirv_optimizer),
             Choice("Texture Sampling", v.texture_sampling, kTextureSamplingNames),

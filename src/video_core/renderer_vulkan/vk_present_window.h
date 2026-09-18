@@ -8,6 +8,9 @@
 #include <queue>
 #include "common/polyfill_thread.h"
 #include "video_core/renderer_vulkan/vk_swapchain.h"
+#ifdef ENABLE_LSFG
+#include "video_core/renderer_vulkan/vk_lsfg.h"
+#endif
 
 VK_DEFINE_HANDLE(VmaAllocation)
 
@@ -72,6 +75,10 @@ private:
 
     void CopyToSwapchain(Frame* frame);
 
+#ifdef ENABLE_LSFG
+    void UpdateFrameGeneration(u32 width, u32 height);
+#endif
+
     vk::RenderPass CreateRenderpass();
 
 private:
@@ -100,6 +107,12 @@ private:
     bool blit_supported;
     bool use_present_thread{true};
     void* last_render_surface{};
+#ifdef ENABLE_LSFG
+    LsfgBridgePtr lsfg_bridge;
+    u32 lsfg_width{};
+    u32 lsfg_height{};
+    bool lsfg_attempted{};
+#endif
 };
 
 } // namespace Vulkan

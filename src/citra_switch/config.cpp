@@ -109,6 +109,9 @@ void VisitPersistedSettings(Visitor&& visit) {
     visit("Renderer", v.use_vsync);
     visit("Renderer", v.use_display_refresh_rate_detection);
     visit("Renderer", v.use_skip_duplicate_frames);
+    visit("Renderer", v.use_frame_generation);
+    visit("Renderer", v.frame_generation_performance_mode);
+    visit("Renderer", v.frame_generation_flow_scale);
     visit("Renderer", v.async_gpu_emulation);
     visit("Renderer", v.strict_gpu_sync);
     visit("Renderer", v.async_presentation);

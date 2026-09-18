@@ -210,6 +210,10 @@ if (ENABLE_VULKAN)
     )
     target_link_libraries(video_core PRIVATE vulkan-headers vma sirit SPIRV glslang)
     if (ENABLE_LSFG)
+        target_sources(video_core PRIVATE
+            renderer_vulkan/vk_lsfg.cpp
+            renderer_vulkan/vk_lsfg.h
+        )
         target_link_libraries(video_core PRIVATE lsfg-vk)
     endif()
     if (DEKOPON)

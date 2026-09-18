@@ -567,6 +567,11 @@ struct Values {
     SwitchableSetting<bool> use_hw_shader{true, Keys::use_hw_shader};
     SwitchableSetting<bool> use_disk_shader_cache{true, Keys::use_disk_shader_cache};
     SwitchableSetting<bool> use_skip_duplicate_frames{true, Keys::use_skip_duplicate_frames};
+    SwitchableSetting<bool> use_frame_generation{false, Keys::use_frame_generation};
+    SwitchableSetting<bool> frame_generation_performance_mode{
+        true, Keys::frame_generation_performance_mode};
+    SwitchableSetting<u32, true> frame_generation_flow_scale{25, 12, 100,
+                                                            Keys::frame_generation_flow_scale};
     SwitchableSetting<bool> shaders_accurate_mul{true, Keys::shaders_accurate_mul};
 #ifdef ANDROID // TODO: Fuck this -OS
     SwitchableSetting<bool> use_vsync{false, Keys::use_vsync};

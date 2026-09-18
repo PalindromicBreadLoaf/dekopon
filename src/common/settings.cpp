@@ -113,6 +113,11 @@ void LogSettings() {
     log_setting("Renderer_FrameLimit", values.frame_limit.GetValue());
     log_setting("Renderer_VSyncNew", values.use_vsync.GetValue());
     log_setting("Renderer_SkipDuplicateFrames", values.use_skip_duplicate_frames.GetValue());
+    log_setting("Renderer_FrameGeneration", values.use_frame_generation.GetValue());
+    log_setting("Renderer_FrameGenerationPerformanceMode",
+                values.frame_generation_performance_mode.GetValue());
+    log_setting("Renderer_FrameGenerationFlowScale",
+                values.frame_generation_flow_scale.GetValue());
     log_setting("Renderer_PostProcessingShader", values.pp_shader_name.GetValue());
     log_setting("Renderer_FilterMode", values.filter_mode.GetValue());
     log_setting("Renderer_TextureFilter", GetTextureFilterName(values.texture_filter.GetValue()));
@@ -234,6 +239,9 @@ void RestoreGlobalState(bool is_powered_on) {
     values.shaders_accurate_mul.SetGlobal(true);
     values.use_vsync.SetGlobal(true);
     values.use_skip_duplicate_frames.SetGlobal(true);
+    values.use_frame_generation.SetGlobal(true);
+    values.frame_generation_performance_mode.SetGlobal(true);
+    values.frame_generation_flow_scale.SetGlobal(true);
     values.resolution_factor.SetGlobal(true);
     values.use_integer_scaling.SetGlobal(true);
     values.frame_limit.SetGlobal(true);

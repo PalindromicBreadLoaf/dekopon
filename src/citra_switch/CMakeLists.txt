@@ -52,6 +52,10 @@ endif()
 # oaknut_horizon_jit is pulled in transitively via oaknut
 target_link_libraries(citra_switch PRIVATE citra_core citra_common inih usbhsfs)
 
+if (ENABLE_LSFG)
+    target_link_libraries(citra_switch PRIVATE vulkan-headers)
+endif()
+
 # The launcher draws with a libnx software framebuffer and renders text with FreeType
 find_path(SWITCH_FREETYPE_INCLUDE_DIR ft2build.h PATH_SUFFIXES freetype2 REQUIRED)
 find_library(SWITCH_FREETYPE freetype REQUIRED)

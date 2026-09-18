@@ -57,6 +57,14 @@ show_shader_compile_notice = false
 # Only affects draws that fall back to the CPU shader engine.
 # Has chance of crashing on some games, although should be safe.
 use_shader_jit =
+# Use lossless scaling (0, default). Needs a user-supplied Lossless.dll at
+# sdmc:/switch/dekopon/lsfg/Lossless.dll.
+use_frame_generation = false
+# Trade interpolation quality for chain cost (1, default).
+frame_generation_performance_mode =
+# Optical-flow resolution as a percentage of the interpolated image, 12-100 (25, default).
+# Chain cost grows with the square of this.
+frame_generation_flow_scale =
 # Skip drawing the right eye of the top screen (0, default).
 # Greatly improves performance in some games, but can cause flickering in others.
 # Can also be toggled live from the quick menu.
