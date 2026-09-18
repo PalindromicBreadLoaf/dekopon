@@ -634,6 +634,34 @@ if (DEKOPON AND ENABLE_VULKAN)
     )
 endif()
 
+# lsfg-vk
+# GPL-V3-or-later
+if (ENABLE_LSFG)
+    set(_lsfg "${CMAKE_CURRENT_SOURCE_DIR}/lsfg-vk")
+    set(_lsfg_src "")
+    foreach(_dir
+            lsfg-vk-common/src/helpers
+            lsfg-vk-common/src/vulkan
+            lsfg-vk-backend/src
+            lsfg-vk-backend/src/extraction
+            lsfg-vk-backend/src/helpers
+            lsfg-vk-backend/src/shaderchains)
+        file(GLOB _dir_src "${_lsfg}/${_dir}/*.cpp")
+        list(APPEND _lsfg_src ${_dir_src})
+    endforeach()
+
+    add_library(lsfg-vk STATIC ${_lsfg_src})
+    target_include_directories(lsfg-vk
+        PUBLIC
+            "${_lsfg}/lsfg-vk-common/include"
+            "${_lsfg}/lsfg-vk-backend/include"
+        PRIVATE
+            "${_lsfg}/lsfg-vk-backend/src")
+    target_link_libraries(lsfg-vk PUBLIC vulkan-headers)
+    target_compile_features(lsfg-vk PRIVATE cxx_std_20)
+    target_disable_warnings(lsfg-vk)
+endif()
+
 set(XXHASH_BUILD_XXHSUM OFF)
 add_subdirectory(xxHash/cmake_unofficial EXCLUDE_FROM_ALL)
 target_compile_definitions(xxhash PRIVATE XXH_FORCE_MEMORY_ACCESS=2)

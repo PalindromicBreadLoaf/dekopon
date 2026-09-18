@@ -238,6 +238,9 @@ if (DEKOPON)
     add_definitions(-D__SWITCH__)
 endif()
 
+# Frame generation borrows Lossless Scaling's interpolation chain.
+CMAKE_DEPENDENT_OPTION(ENABLE_LSFG "Enables LSFG frame generation" ON "DEKOPON AND ENABLE_VULKAN" OFF)
+
 # Pass the following values to C++ land
 if (ENABLE_QT)
     add_definitions(-DENABLE_QT)
@@ -250,6 +253,9 @@ if (ENABLE_ROOM)
 endif()
 if (ENABLE_SDL2)
     add_definitions(-DENABLE_SDL2)
+endif()
+if (ENABLE_LSFG)
+    add_definitions(-DENABLE_LSFG)
 endif()
 
 if(ENABLE_SSE42 AND (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64"))
