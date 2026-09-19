@@ -2,6 +2,8 @@
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
 
+#include <exception>
+
 #include "common/horizon_thread.h"
 #include "common/microprofile.h"
 #include "common/settings.h"
@@ -109,7 +111,8 @@ PresentWindow::PresentWindow(Frontend::EmuWindow& emu_window_, const Instance& i
       vsync_enabled{Settings::values.use_vsync.GetValue()},
       blit_supported{
           CanBlitToSwapchain(instance.GetPhysicalDevice(), swapchain.GetSurfaceFormat().format)},
-      use_present_thread{Settings::values.async_presentation.GetValue()},
+      async_presentation{Settings::values.async_presentation.GetValue()},
+      use_present_thread{async_presentation},
       last_render_surface{emu_window.GetWindowInfo().render_surface} {
 
     const u32 num_images = swapchain.GetImageCount();
@@ -122,17 +125,26 @@ PresentWindow::PresentWindow(Frontend::EmuWindow& emu_window_, const Instance& i
     };
     command_pool = device.createCommandPool(pool_info);
 
+#ifdef ENABLE_LSFG
+    constexpr u32 buffers_per_frame = 2;
+#else
+    constexpr u32 buffers_per_frame = 1;
+#endif
+
     const vk::CommandBufferAllocateInfo alloc_info = {
         .commandPool = command_pool,
         .level = vk::CommandBufferLevel::ePrimary,
-        .commandBufferCount = num_images,
+        .commandBufferCount = num_images * buffers_per_frame,
     };
     const std::vector command_buffers = device.allocateCommandBuffers(alloc_info);
 
     swap_chain.resize(num_images);
     for (u32 i = 0; i < num_images; i++) {
         Frame& frame = swap_chain[i];
-        frame.cmdbuf = command_buffers[i];
+        frame.cmdbuf = command_buffers[i * buffers_per_frame];
+#ifdef ENABLE_LSFG
+        frame.generated_cmdbuf = command_buffers[i * buffers_per_frame + 1];
+#endif
         frame.render_ready = device.createSemaphore({});
         frame.present_done = device.createFence({.flags = vk::FenceCreateFlagBits::eSignaled});
         free_queue.push(&frame);
@@ -285,11 +297,29 @@ Frame* PresentWindow::GetRenderFrame() {
     return frame;
 }
 
+bool PresentWindow::ShouldUsePresentThread() const {
+#ifdef ENABLE_LSFG
+    if (Settings::values.use_frame_generation.GetValue()) {
+        return false;
+    }
+#endif
+    return async_presentation;
+}
+
 void PresentWindow::Present(Frame* frame) {
+    const bool async = ShouldUsePresentThread();
+    if (async != use_present_thread) {
+        WaitPresent();
+        use_present_thread = async;
+    }
+
     if (!use_present_thread) {
         scheduler.WaitWorker();
         CopyToSwapchain(frame);
+
+        std::scoped_lock lock{free_mutex};
         free_queue.push(frame);
+        free_cv.notify_one();
         return;
     }
 
@@ -301,7 +331,7 @@ void PresentWindow::Present(Frame* frame) {
 }
 
 void PresentWindow::WaitPresent() {
-    if (!use_present_thread) {
+    if (!present_thread.joinable()) {
         return;
     }
 
@@ -358,9 +388,17 @@ void PresentWindow::NotifySurfaceChanged() {
 }
 
 #ifdef ENABLE_LSFG
+void PresentWindow::ResetFrameGeneration() {
+    if (!lsfg_bridge) {
+        return;
+    }
+    std::scoped_lock submit_lock{scheduler.submit_mutex};
+    lsfg_bridge.reset();
+}
+
 void PresentWindow::UpdateFrameGeneration(u32 width, u32 height) {
     if (!Settings::values.use_frame_generation.GetValue()) {
-        lsfg_bridge.reset();
+        ResetFrameGeneration();
         lsfg_attempted = false;
         return;
     }
@@ -369,7 +407,7 @@ void PresentWindow::UpdateFrameGeneration(u32 width, u32 height) {
         return;
     }
 
-    lsfg_bridge.reset();
+    ResetFrameGeneration();
     lsfg_attempted = true;
     lsfg_width = width;
     lsfg_height = height;
@@ -393,52 +431,90 @@ void PresentWindow::UpdateFrameGeneration(u32 width, u32 height) {
             static_cast<float>(Settings::values.frame_generation_flow_scale.GetValue()) / 100.0f,
         .performance_mode = Settings::values.frame_generation_performance_mode.GetValue(),
     };
+
+    std::scoped_lock submit_lock{scheduler.submit_mutex};
     lsfg_bridge = CreateLsfgBridge(info);
+}
+
+bool PresentWindow::CopyToSwapchainGenerated(Frame* frame) {
+    VkImage generated{};
+    try {
+        std::scoped_lock submit_lock{scheduler.submit_mutex};
+        generated = lsfg_bridge->RecordFrame(frame->image, frame->render_ready);
+    } catch (const std::exception& e) {
+        LOG_ERROR(Render_Vulkan, "Frame generation failed, reverting to plain presentation: {}",
+                  e.what());
+        ResetFrameGeneration();
+        return false;
+    }
+
+    const auto blit_and_present = [&](vk::CommandBuffer cmdbuf, const BlitSource& source,
+                                      vk::Fence fence) {
+        AcquireSwapchainImage(frame->width, frame->height);
+        cmdbuf.begin(vk::CommandBufferBeginInfo{
+            .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit,
+        });
+        RecordBlitToSwapchain(cmdbuf, source, swapchain.Image());
+        cmdbuf.end();
+        SubmitAndPresent(cmdbuf, VK_NULL_HANDLE, fence);
+    };
+
+    if (generated) {
+        blit_and_present(frame->generated_cmdbuf,
+                         BlitSource{
+                             .image = vk::Image{generated},
+                             .width = frame->width,
+                             .height = frame->height,
+                             .layout = vk::ImageLayout::eGeneral,
+                             .access = vk::AccessFlagBits::eShaderWrite,
+                             .stage = vk::PipelineStageFlagBits::eComputeShader,
+                         },
+                         VK_NULL_HANDLE);
+    }
+
+    blit_and_present(frame->cmdbuf,
+                     BlitSource{
+                         .image = frame->image,
+                         .width = frame->width,
+                         .height = frame->height,
+                         .layout = vk::ImageLayout::eTransferSrcOptimal,
+                         .access = vk::AccessFlagBits::eMemoryRead,
+                         .stage = vk::PipelineStageFlagBits::eAllCommands,
+                     },
+                     frame->present_done);
+    return true;
 }
 #endif
 
-void PresentWindow::CopyToSwapchain(Frame* frame) {
-    const auto recreate_swapchain = [&] {
+void PresentWindow::RecreateSwapchain(u32 width, u32 height) {
 #ifdef ANDROID
-        {
-            std::unique_lock lock{recreate_surface_mutex};
-            recreate_surface_cv.wait(lock, [this]() { return surface != next_surface; });
-            surface = next_surface;
-        }
-#endif
-        std::scoped_lock submit_lock{scheduler.submit_mutex};
-        graphics_queue.waitIdle();
-        swapchain.Create(frame->width, frame->height, surface, low_refresh_rate);
-    };
-
-#ifndef ANDROID
-    const bool use_vsync = Settings::values.use_vsync.GetValue();
-    const bool size_changed =
-        swapchain.GetWidth() != frame->width || swapchain.GetHeight() != frame->height;
-    const bool vsync_changed = vsync_enabled != use_vsync;
-    if (vsync_changed || size_changed) [[unlikely]] {
-        vsync_enabled = use_vsync;
-        recreate_swapchain();
+    {
+        std::unique_lock lock{recreate_surface_mutex};
+        recreate_surface_cv.wait(lock, [this]() { return surface != next_surface; });
+        surface = next_surface;
     }
 #endif
+    std::scoped_lock submit_lock{scheduler.submit_mutex};
+    graphics_queue.waitIdle();
+    swapchain.Create(width, height, surface, low_refresh_rate);
+}
 
-#ifdef ENABLE_LSFG
-    UpdateFrameGeneration(frame->width, frame->height);
-#endif
-
+void PresentWindow::AcquireSwapchainImage(u32 width, u32 height) {
     while (!swapchain.AcquireNextImage()) {
-        recreate_swapchain();
+        RecreateSwapchain(width, height);
     }
+}
 
-    const vk::Image swapchain_image = swapchain.Image();
-
-    const vk::CommandBufferBeginInfo begin_info = {
-        .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit,
+void PresentWindow::RecordBlitToSwapchain(vk::CommandBuffer cmdbuf, const BlitSource& source,
+                                          vk::Image swapchain_image) {
+    const vk::ImageSubresourceRange subresource_range{
+        .aspectMask = vk::ImageAspectFlagBits::eColor,
+        .baseMipLevel = 0,
+        .levelCount = 1,
+        .baseArrayLayer = 0,
+        .layerCount = VK_REMAINING_ARRAY_LAYERS,
     };
-    const vk::CommandBuffer cmdbuf = frame->cmdbuf;
-    cmdbuf.begin(begin_info);
 
-    const vk::Extent2D extent = swapchain.GetExtent();
     const std::array pre_barriers{
         vk::ImageMemoryBarrier{
             .srcAccessMask = vk::AccessFlagBits::eNone,
@@ -448,80 +524,78 @@ void PresentWindow::CopyToSwapchain(Frame* frame) {
             .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .image = swapchain_image,
-            .subresourceRange{
-                .aspectMask = vk::ImageAspectFlagBits::eColor,
-                .baseMipLevel = 0,
-                .levelCount = 1,
-                .baseArrayLayer = 0,
-                .layerCount = VK_REMAINING_ARRAY_LAYERS,
-            },
+            .subresourceRange = subresource_range,
         },
         vk::ImageMemoryBarrier{
-            .srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite,
+            .srcAccessMask = source.access,
             .dstAccessMask = vk::AccessFlagBits::eTransferRead,
-            .oldLayout = vk::ImageLayout::eTransferSrcOptimal,
+            .oldLayout = source.layout,
             .newLayout = vk::ImageLayout::eTransferSrcOptimal,
             .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .image = frame->image,
-            .subresourceRange{
-                .aspectMask = vk::ImageAspectFlagBits::eColor,
-                .baseMipLevel = 0,
-                .levelCount = 1,
-                .baseArrayLayer = 0,
-                .layerCount = VK_REMAINING_ARRAY_LAYERS,
-            },
-        },
-    };
-    const vk::ImageMemoryBarrier post_barrier{
-        .srcAccessMask = vk::AccessFlagBits::eTransferWrite,
-        .dstAccessMask = vk::AccessFlagBits::eMemoryRead,
-        .oldLayout = vk::ImageLayout::eTransferDstOptimal,
-        .newLayout = vk::ImageLayout::ePresentSrcKHR,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = swapchain_image,
-        .subresourceRange{
-            .aspectMask = vk::ImageAspectFlagBits::eColor,
-            .baseMipLevel = 0,
-            .levelCount = 1,
-            .baseArrayLayer = 0,
-            .layerCount = VK_REMAINING_ARRAY_LAYERS,
+            .image = source.image,
+            .subresourceRange = subresource_range,
         },
     };
 
-    cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eColorAttachmentOutput,
-                           vk::PipelineStageFlagBits::eTransfer, vk::DependencyFlagBits::eByRegion,
-                           {}, {}, pre_barriers);
+    std::array post_barriers{
+        vk::ImageMemoryBarrier{
+            .srcAccessMask = vk::AccessFlagBits::eTransferWrite,
+            .dstAccessMask = vk::AccessFlagBits::eMemoryRead,
+            .oldLayout = vk::ImageLayout::eTransferDstOptimal,
+            .newLayout = vk::ImageLayout::ePresentSrcKHR,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .image = swapchain_image,
+            .subresourceRange = subresource_range,
+        },
+        vk::ImageMemoryBarrier{
+            .srcAccessMask = vk::AccessFlagBits::eTransferRead,
+            .dstAccessMask = source.access,
+            .oldLayout = vk::ImageLayout::eTransferSrcOptimal,
+            .newLayout = source.layout,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .image = source.image,
+            .subresourceRange = subresource_range,
+        },
+    };
+    const u32 post_barrier_count =
+        source.layout == vk::ImageLayout::eTransferSrcOptimal ? 1u : 2u;
 
+    cmdbuf.pipelineBarrier(source.stage, vk::PipelineStageFlagBits::eTransfer,
+                           vk::DependencyFlagBits::eByRegion, {}, {}, pre_barriers);
+
+    const vk::Extent2D extent = swapchain.GetExtent();
     if (blit_supported) {
-        cmdbuf.blitImage(frame->image, vk::ImageLayout::eTransferSrcOptimal, swapchain_image,
+        cmdbuf.blitImage(source.image, vk::ImageLayout::eTransferSrcOptimal, swapchain_image,
                          vk::ImageLayout::eTransferDstOptimal,
-                         MakeImageBlit(frame->width, frame->height, extent.width, extent.height),
+                         MakeImageBlit(source.width, source.height, extent.width, extent.height),
                          vk::Filter::eLinear);
     } else {
-        cmdbuf.copyImage(frame->image, vk::ImageLayout::eTransferSrcOptimal, swapchain_image,
+        cmdbuf.copyImage(source.image, vk::ImageLayout::eTransferSrcOptimal, swapchain_image,
                          vk::ImageLayout::eTransferDstOptimal,
-                         MakeImageCopy(frame->width, frame->height, extent.width, extent.height));
+                         MakeImageCopy(source.width, source.height, extent.width, extent.height));
     }
 
-    cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eAllCommands,
-                           vk::PipelineStageFlagBits::eAllCommands,
-                           vk::DependencyFlagBits::eByRegion, {}, {}, post_barrier);
+    cmdbuf.pipelineBarrier(
+        vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eAllCommands,
+        vk::DependencyFlagBits::eByRegion, {}, {},
+        vk::ArrayProxy<const vk::ImageMemoryBarrier>{post_barrier_count, post_barriers.data()});
+}
 
-    cmdbuf.end();
-
+void PresentWindow::SubmitAndPresent(vk::CommandBuffer cmdbuf, vk::Semaphore render_ready,
+                                     vk::Fence fence) {
     static constexpr std::array<vk::PipelineStageFlags, 2> wait_stage_masks = {
         vk::PipelineStageFlagBits::eColorAttachmentOutput,
         vk::PipelineStageFlagBits::eAllGraphics,
     };
 
     const vk::Semaphore present_ready = swapchain.GetPresentReadySemaphore();
-    const vk::Semaphore image_acquired = swapchain.GetImageAcquiredSemaphore();
-    const std::array wait_semaphores = {image_acquired, frame->render_ready};
+    const std::array wait_semaphores = {swapchain.GetImageAcquiredSemaphore(), render_ready};
 
-    vk::SubmitInfo submit_info = {
-        .waitSemaphoreCount = static_cast<u32>(wait_semaphores.size()),
+    const vk::SubmitInfo submit_info = {
+        .waitSemaphoreCount = render_ready ? 2u : 1u,
         .pWaitSemaphores = wait_semaphores.data(),
         .pWaitDstStageMask = wait_stage_masks.data(),
         .commandBufferCount = 1u,
@@ -533,13 +607,53 @@ void PresentWindow::CopyToSwapchain(Frame* frame) {
     std::scoped_lock submit_lock{scheduler.submit_mutex, recreate_surface_mutex};
 
     try {
-        graphics_queue.submit(submit_info, frame->present_done);
+        graphics_queue.submit(submit_info, fence);
     } catch (vk::DeviceLostError& err) {
         LOG_CRITICAL(Render_Vulkan, "Device lost during present submit: {}", err.what());
         UNREACHABLE();
     }
 
     swapchain.Present();
+}
+
+void PresentWindow::CopyToSwapchain(Frame* frame) {
+#ifndef ANDROID
+    const bool use_vsync = Settings::values.use_vsync.GetValue();
+    const bool size_changed =
+        swapchain.GetWidth() != frame->width || swapchain.GetHeight() != frame->height;
+    const bool vsync_changed = vsync_enabled != use_vsync;
+    if (vsync_changed || size_changed) [[unlikely]] {
+        vsync_enabled = use_vsync;
+        RecreateSwapchain(frame->width, frame->height);
+    }
+#endif
+
+#ifdef ENABLE_LSFG
+    UpdateFrameGeneration(frame->width, frame->height);
+    if (lsfg_bridge && CopyToSwapchainGenerated(frame)) {
+        return;
+    }
+#endif
+
+    AcquireSwapchainImage(frame->width, frame->height);
+
+    const vk::CommandBuffer cmdbuf = frame->cmdbuf;
+    cmdbuf.begin(vk::CommandBufferBeginInfo{
+        .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit,
+    });
+    RecordBlitToSwapchain(cmdbuf,
+                          BlitSource{
+                              .image = frame->image,
+                              .width = frame->width,
+                              .height = frame->height,
+                              .layout = vk::ImageLayout::eTransferSrcOptimal,
+                              .access = vk::AccessFlagBits::eColorAttachmentWrite,
+                              .stage = vk::PipelineStageFlagBits::eColorAttachmentOutput,
+                          },
+                          swapchain.Image());
+    cmdbuf.end();
+
+    SubmitAndPresent(cmdbuf, frame->render_ready, frame->present_done);
 }
 
 vk::RenderPass PresentWindow::CreateRenderpass() {

@@ -35,6 +35,9 @@ struct Frame {
     vk::Semaphore render_ready;
     vk::Fence present_done;
     vk::CommandBuffer cmdbuf;
+#ifdef ENABLE_LSFG
+    vk::CommandBuffer generated_cmdbuf;
+#endif
 };
 
 class PresentWindow final {
@@ -73,10 +76,34 @@ public:
 private:
     void PresentThread(std::stop_token token);
 
+    bool ShouldUsePresentThread() const;
+
+    void RecreateSwapchain(u32 width, u32 height);
+
+    void AcquireSwapchainImage(u32 width, u32 height);
+
+    struct BlitSource {
+        vk::Image image;
+        u32 width;
+        u32 height;
+        vk::ImageLayout layout;
+        vk::AccessFlags access;
+        vk::PipelineStageFlags stage;
+    };
+
+    void RecordBlitToSwapchain(vk::CommandBuffer cmdbuf, const BlitSource& source,
+                               vk::Image swapchain_image);
+
+    void SubmitAndPresent(vk::CommandBuffer cmdbuf, vk::Semaphore render_ready, vk::Fence fence);
+
     void CopyToSwapchain(Frame* frame);
 
 #ifdef ENABLE_LSFG
+    void ResetFrameGeneration();
+
     void UpdateFrameGeneration(u32 width, u32 height);
+
+    bool CopyToSwapchainGenerated(Frame* frame);
 #endif
 
     vk::RenderPass CreateRenderpass();
@@ -105,6 +132,7 @@ private:
     std::jthread present_thread;
     bool vsync_enabled{};
     bool blit_supported;
+    bool async_presentation{true};
     bool use_present_thread{true};
     void* last_render_surface{};
 #ifdef ENABLE_LSFG

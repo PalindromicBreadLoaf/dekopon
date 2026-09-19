@@ -23,13 +23,14 @@ struct LsfgBridgeInfo {
     bool performance_mode;
 };
 
-class LsfgBridge;
+class LsfgBridge {
+public:
+    virtual ~LsfgBridge() = default;
 
-struct LsfgBridgeDeleter {
-    void operator()(LsfgBridge* bridge) const noexcept;
+    virtual VkImage RecordFrame(VkImage frame_image, VkSemaphore render_ready) = 0;
 };
 
-using LsfgBridgePtr = std::unique_ptr<LsfgBridge, LsfgBridgeDeleter>;
+using LsfgBridgePtr = std::unique_ptr<LsfgBridge>;
 
 std::string GetLsfgShaderDllPath();
 
