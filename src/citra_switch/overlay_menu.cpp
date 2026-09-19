@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "citra_switch/amiibo_session.h"
 #include "citra_switch/camera/still_image_camera.h"
 #include "citra_switch/config.h"
 #include "citra_switch/menu_data.h"
@@ -42,6 +43,8 @@ enum class Item {
     SaveStateSlot,
     AmiiboFile,
     AmiibosEmpty,
+    ScanRealAmiibo,
+    OverwriteAmiibo,
     RemoveAmiibo,
     CameraTargetRow,
     CameraImage,
@@ -123,6 +126,7 @@ int s_selected = 0;
 int s_cheat_page = 0;
 int s_state_page = 0;
 int s_amiibo_page = 0;
+bool s_overwrite_armed = false;
 int s_camera_page = 0;
 std::vector<Row> s_rows;
 std::vector<SettingsRow> s_settings;
@@ -379,6 +383,10 @@ void RebuildRows() {
         if (s_amiibos.empty()) {
             s_rows.push_back({Item::AmiibosEmpty});
         }
+        s_rows.push_back({Item::ScanRealAmiibo});
+        if (HasPendingAmiiboOverwrite()) {
+            s_rows.push_back({Item::OverwriteAmiibo});
+        }
         s_rows.push_back({Item::RemoveAmiibo});
     } else {
         s_rows.push_back({Item::CameraTargetRow});
@@ -452,6 +460,15 @@ std::string Label(const Row& row) {
         return s_amiibos[static_cast<std::size_t>(row.index)].name;
     case Item::AmiibosEmpty:
         return "No .bin files in amiibo/";
+    case Item::ScanRealAmiibo:
+        if (IsRealAmiiboActive()) {
+            return "Amiibo on the reader";
+        }
+        return IsRealAmiiboScanning() ? "Waiting for an Amiibo..." : "Scan a real Amiibo";
+    case Item::OverwriteAmiibo:
+        return s_overwrite_armed
+                   ? "Press A again to erase " + PendingAmiiboOverwriteOwner()
+                   : "Save anyway (erases " + PendingAmiiboOverwriteOwner() + ")";
     case Item::RemoveAmiibo:
         return "Remove active Amiibo";
     case Item::CameraTargetRow:
@@ -734,6 +751,7 @@ QuickMenuAction UpdateQuickMenu(const QuickMenuNav& nav) {
     }
 
     if (nav.cancel) {
+        s_overwrite_armed = false;
         if (CurrentPage() != Page::Home) {
             const int came_from = s_page;
             EnterPage(Page::Home);
@@ -770,6 +788,10 @@ QuickMenuAction UpdateQuickMenu(const QuickMenuNav& nav) {
     if (nav.down) {
         MoveSelection(+1);
         changed = true;
+    }
+
+    if (changed) {
+        s_overwrite_armed = false;
     }
 
     if (s_rows.empty()) {
@@ -846,7 +868,45 @@ QuickMenuAction UpdateQuickMenu(const QuickMenuNav& nav) {
         Repaint();
         return QuickMenuAction::None;
     }
+    if (row.item == Item::ScanRealAmiibo && nav.confirm) {
+        if (IsRealAmiiboScanning()) {
+            CancelRealAmiiboScan();
+            VideoCore::PostOverlayToast("Stopped looking for an Amiibo");
+            Repaint();
+            return QuickMenuAction::None;
+        }
+        std::string message;
+        const bool started = BeginRealAmiiboScan(message);
+        VideoCore::PostOverlayToast(message);
+        if (started) {
+            CloseQuickMenu();
+            return QuickMenuAction::Close;
+        }
+        Repaint();
+        return QuickMenuAction::None;
+    }
+    if (row.item == Item::OverwriteAmiibo && nav.confirm) {
+        if (!s_overwrite_armed) {
+            s_overwrite_armed = true;
+            RebuildRows();
+            Repaint();
+            return QuickMenuAction::None;
+        }
+        s_overwrite_armed = false;
+        std::string message;
+        ConfirmAmiiboOverwrite(message);
+        VideoCore::PostOverlayToast(message);
+        RebuildRows();
+        Repaint();
+        return QuickMenuAction::None;
+    }
     if (row.item == Item::RemoveAmiibo && nav.confirm) {
+        if (IsRealAmiiboActive()) {
+            EndRealAmiibo();
+            VideoCore::PostOverlayToast("Amiibo removed");
+            Repaint();
+            return QuickMenuAction::None;
+        }
         RemoveAmiibo();
         Repaint();
         return QuickMenuAction::None;

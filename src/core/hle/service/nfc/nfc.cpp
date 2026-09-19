@@ -693,6 +693,11 @@ bool Module::Interface::LoadAmiibo(const std::string& fullpath) {
     return nfc->device->LoadAmiibo(fullpath);
 }
 
+bool Module::Interface::LoadAmiiboFromMemory(std::span<const u8> plain_tag,
+                                             NfcDevice::AmiiboWriteback writeback) {
+    return nfc->device->LoadAmiiboFromMemory(plain_tag, std::move(writeback));
+}
+
 void Module::Interface::RemoveAmiibo() {
     nfc->device->UnloadAmiibo();
 }

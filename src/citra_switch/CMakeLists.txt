@@ -4,6 +4,12 @@ enable_language(ASM)
 
 # Dekopon frontend
 add_executable(citra_switch
+    amiibo_convert.cpp
+    amiibo_convert.h
+    amiibo_reader.cpp
+    amiibo_reader.h
+    amiibo_session.cpp
+    amiibo_session.h
     applets/swkbd.cpp
     applets/swkbd.h
     applets/swkbd_horizon.cpp

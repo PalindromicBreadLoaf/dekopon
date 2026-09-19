@@ -8,6 +8,7 @@
 #include <utility>
 #include <switch.h>
 
+#include "citra_switch/amiibo_session.h"
 #include "citra_switch/applets/swkbd.h"
 #include "citra_switch/updater.h"
 #include "citra_switch/config.h"
@@ -287,6 +288,8 @@ void RunGame(PadState& pad, const std::string& rom) {
                 }
             }
 
+            SwitchFrontend::UpdateRealAmiibo();
+
             prev_held = held;
             prev_input = state.buttons;
             if (!SwitchFrontend::IsRunning()) {
@@ -295,6 +298,7 @@ void RunGame(PadState& pad, const std::string& rom) {
             // The async GPU thread shares core 0 with this loop.
             svcSleepThread(4'000'000);
         }
+        SwitchFrontend::EndRealAmiibo();
         SwitchFrontend::StopRom();
         if (SwitchFrontend::ArticDisconnected()) {
             SwitchFrontend::SetMenuNotice(

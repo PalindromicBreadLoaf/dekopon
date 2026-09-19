@@ -52,8 +52,53 @@ NfcDevice::NfcDevice(Core::System& system_) : system{system_} {
 
 NfcDevice::~NfcDevice() = default;
 
+bool NfcDevice::LoadAmiiboFromMemory(std::span<const u8> plain_tag, AmiiboWriteback writeback_) {
+    if (!is_initalized) {
+        LOG_ERROR(Service_NFC, "Not initialized");
+        return false;
+    }
+
+    if (device_state != DeviceState::SearchingForTag) {
+        LOG_ERROR(Service_NFC, "Application is not looking for amiibos, current state {}",
+                  device_state);
+        return false;
+    }
+
+    if (plain_tag.size() < sizeof(tag.file)) {
+        LOG_ERROR(Service_NFC, "Tag image is {} bytes, expected {}", plain_tag.size(),
+                  sizeof(tag.file));
+        return false;
+    }
+
+    std::memcpy(&tag.file, plain_tag.data(), sizeof(tag.file));
+
+    if (!AmiiboCrypto::IsAmiiboValid(tag.file)) {
+        LOG_ERROR(Service_NFC, "Tag image is not a valid amiibo");
+        tag.file = {};
+        return false;
+    }
+
+    is_plain_amiibo = true;
+    is_write_protected = false;
+    is_physical_tag = true;
+    writeback = std::move(writeback_);
+    amiibo_filename.clear();
+    encrypted_tag.file = AmiiboCrypto::EncodedDataToNfcData(tag.file);
+
+    device_state = DeviceState::TagFound;
+    is_tag_in_range = true;
+    tag_out_of_range_event->Clear();
+    tag_in_range_event->Signal();
+
+    LOG_INFO(Service_NFC, "Loaded a tag from a physical reader");
+    return true;
+}
+
 bool NfcDevice::LoadAmiibo(std::string filename) {
     FileUtil::IOFile amiibo_file(filename, "rb");
+
+    is_physical_tag = false;
+    writeback = nullptr;
 
     if (!is_initalized) {
         LOG_ERROR(Service_NFC, "Not initialized");
@@ -116,6 +161,8 @@ bool NfcDevice::LoadAmiibo(std::string filename) {
 void NfcDevice::UnloadAmiibo() {
     is_tag_in_range = false;
     amiibo_filename = "";
+    is_physical_tag = false;
+    writeback = nullptr;
     CloseAmiibo();
 }
 
@@ -283,6 +330,15 @@ Result NfcDevice::Flush() {
 
     if (is_write_protected) {
         LOG_ERROR(Service_NFC, "No keys available skipping write request");
+        return ResultSuccess;
+    }
+
+    if (writeback) {
+        if (!writeback(tag.file.application_area_id, tag.file.application_area)) {
+            LOG_ERROR(Service_NFC, "Could not write the application area back to the tag");
+            return ResultOperationFailed;
+        }
+        is_data_moddified = false;
         return ResultSuccess;
     }
 
@@ -1109,6 +1165,11 @@ void NfcDevice::RescheduleTagRemoveEvent() {
 
     if (device_state != DeviceState::TagFound && device_state != DeviceState::TagMounted &&
         device_state != DeviceState::TagPartiallyMounted) {
+        return;
+    }
+
+    // A tag on a reader stays until it is physically lifted off it.
+    if (is_physical_tag) {
         return;
     }
 

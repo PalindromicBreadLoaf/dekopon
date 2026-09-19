@@ -45,6 +45,9 @@ public:
 
         bool LoadAmiibo(const std::string& fullpath);
 
+        bool LoadAmiiboFromMemory(std::span<const u8> plain_tag,
+                                  NfcDevice::AmiiboWriteback writeback);
+
         void RemoveAmiibo();
 
     protected:

@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <functional>
 #include <span>
 #include <vector>
 #include <boost/serialization/binary_object.hpp>
@@ -21,10 +22,14 @@ class KReadableEvent;
 namespace Service::NFC {
 class NfcDevice {
 public:
+    using AmiiboWriteback = std::function<bool(u32 access_id, std::span<const u8> application_area)>;
+
     NfcDevice(Core::System& system_);
     ~NfcDevice();
 
     bool LoadAmiibo(std::string filename);
+
+    bool LoadAmiiboFromMemory(std::span<const u8> plain_tag, AmiiboWriteback writeback_);
     void UnloadAmiibo();
     void CloseAmiibo();
 
@@ -101,6 +106,9 @@ private:
     CommunicationState communication_state = CommunicationState::Idle;
 
     std::string amiibo_filename = "";
+
+    bool is_physical_tag{};
+    AmiiboWriteback writeback{};
 
     SerializableAmiiboFile tag{};
     SerializableEncryptedAmiiboFile encrypted_tag{};
