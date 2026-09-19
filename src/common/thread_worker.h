@@ -23,6 +23,15 @@
 
 namespace Common {
 
+namespace detail {
+using ThreadWorkerStopFn = void (*)(void*);
+
+void RegisterThreadWorker(void* worker, ThreadWorkerStopFn stop);
+void UnregisterThreadWorker(void* worker);
+} // namespace detail
+
+void StopAllThreadWorkers();
+
 template <class StateType = void>
 class StatefulThreadWorker {
     static constexpr bool with_state = !std::is_same_v<StateType, void>;
@@ -93,6 +102,15 @@ public:
         for (std::size_t i = 0; i < num_workers; ++i) {
             threads.emplace_back(lambda, i);
         }
+
+        detail::RegisterThreadWorker(this, [](void* worker) {
+            static_cast<StatefulThreadWorker*>(worker)->StopAndJoin();
+        });
+    }
+
+    ~StatefulThreadWorker() {
+        detail::UnregisterThreadWorker(this);
+        StopAndJoin();
     }
 
     StatefulThreadWorker& operator=(const StatefulThreadWorker&) = delete;
@@ -127,6 +145,19 @@ public:
     }
 
 private:
+    void StopAndJoin() {
+        for (auto& thread : threads) {
+            thread.request_stop();
+        }
+        condition.notify_all();
+        wait_condition.notify_all();
+        for (auto& thread : threads) {
+            if (thread.joinable()) {
+                thread.join();
+            }
+        }
+    }
+
     std::queue<Task> requests;
     std::mutex queue_mutex;
     std::condition_variable_any condition;

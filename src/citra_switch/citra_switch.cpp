@@ -17,6 +17,10 @@
 #include "citra_switch/usb_storage.h"
 #include "common/horizon_thread.h"
 
+namespace Common {
+void StopAllThreadWorkers();
+}
+
 extern "C" {
 u32 __nx_applet_type = AppletType_Application;
 size_t __nx_heap_size = 0;
@@ -373,6 +377,7 @@ int main(int argc, char* argv[]) {
     SwitchFrontend::ShutdownInput();
     StopSixAxis();
     SwitchFrontend::Shutdown();
+    Common::StopAllThreadWorkers();
     SwitchFrontend::ShutdownUsbStorage();
     if (have_romfs) {
         romfsExit();

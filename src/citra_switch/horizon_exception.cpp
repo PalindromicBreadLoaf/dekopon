@@ -4,10 +4,9 @@
 
 // The C side of the replacement __libnx_exception_entry.
 
-#include <cinttypes>
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
+#include <unistd.h>
 
 #include <switch.h>
 
@@ -26,19 +25,111 @@ static_assert(offsetof(ThreadExceptionDump, fpu_gprs) == DUMP_FPU);
 static_assert(offsetof(ThreadExceptionDump, pstate) == DUMP_PSTATE);
 static_assert(offsetof(ThreadExceptionDump, far) == DUMP_FAR);
 
-// core: true when the fault address lands inside the live guest fastmem arena.
 extern "C" bool DekoponFastmemArenaContains(std::uintptr_t addr);
-// dynarmic: backpatches the fastmem access at host_pc and reports where to resume.
 extern "C" bool DynarmicHorizonHandleFastmemFault(std::uint64_t host_pc, std::uint64_t* new_pc);
+extern "C" void _start();
 
 namespace {
 // ESR exception classes for a data abort taken from a lower or the current exception level.
 constexpr std::uint32_t ESR_EC_DATA_ABORT_LOWER = 0x24;
 constexpr std::uint32_t ESR_EC_DATA_ABORT_SAME = 0x25;
+
+constexpr const char* CRASH_PATH = "/switch/dekopon/log/crash.txt";
+
+char s_report[8192];
+std::size_t s_report_len;
+
+void Put(char c) {
+    if (s_report_len < sizeof(s_report)) {
+        s_report[s_report_len++] = c;
+    }
+}
+
+void Put(const char* text) {
+    while (*text != '\0') {
+        Put(*text++);
+    }
+}
+
+void PutHex(std::uint64_t value, int digits) {
+    static constexpr char HEX[] = "0123456789abcdef";
+    for (int shift = (digits - 1) * 4; shift >= 0; shift -= 4) {
+        Put(HEX[(value >> shift) & 0xF]);
+    }
+}
+
+void PutField(const char* name, std::uint64_t value) {
+    Put(name);
+    Put(" = ");
+    PutHex(value, 16);
+    Put("\n");
+}
+
+void PutCodeField(const char* name, std::uint64_t value, std::uintptr_t base) {
+    Put(name);
+    Put(" = ");
+    PutHex(value, 16);
+    if (value >= base) {
+        Put("  (+0x");
+        PutHex(value - base, 6);
+        Put(")");
+    }
+    Put("\n");
+}
+
+void BuildReport(ThreadExceptionDump* ctx) {
+    const std::uintptr_t base = reinterpret_cast<std::uintptr_t>(&_start);
+
+    Put("Dekopon: unhandled CPU exception\n");
+    PutField("module base", base);
+
+    if (!threadExceptionIsAArch64(ctx)) {
+        PutField("aarch32 pc ", ctx->pc.w);
+        return;
+    }
+
+    PutField("error_desc ", ctx->error_desc);
+    PutField("esr        ", ctx->esr);
+    PutCodeField("pc         ", ctx->pc.x, base);
+    PutCodeField("lr         ", ctx->lr.x, base);
+    PutField("sp         ", ctx->sp.x);
+    PutField("fp         ", ctx->fp.x);
+    PutField("far        ", ctx->far.x);
+    PutField("pstate     ", ctx->pstate);
+
+    for (int i = 0; i < 29; ++i) {
+        Put("x");
+        Put(i < 10 ? ' ' : static_cast<char>('0' + i / 10));
+        Put(static_cast<char>('0' + i % 10));
+        Put("         = ");
+        PutHex(ctx->cpu_gprs[i].x, 16);
+        Put("\n");
+    }
+}
+
+void WriteReportToSd() {
+    FsFileSystem* sdmc = fsdevGetDeviceFileSystem("sdmc");
+    if (sdmc == nullptr) {
+        return;
+    }
+
+    fsFsCreateDirectory(sdmc, "/switch");
+    fsFsCreateDirectory(sdmc, "/switch/dekopon");
+    fsFsCreateDirectory(sdmc, "/switch/dekopon/log");
+    fsFsDeleteFile(sdmc, CRASH_PATH);
+    if (R_FAILED(fsFsCreateFile(sdmc, CRASH_PATH, static_cast<s64>(s_report_len), 0))) {
+        return;
+    }
+
+    FsFile file;
+    if (R_FAILED(fsFsOpenFile(sdmc, CRASH_PATH, FsOpenMode_Write, &file))) {
+        return;
+    }
+    fsFileWrite(&file, 0, s_report, s_report_len, FsWriteOption_Flush);
+    fsFileClose(&file);
+}
 }  // namespace
 
-// Runs in exception context on a private per-fault stack. Returning true resumes the faulting thread
-// at ctx->pc, otherwise returning false routes it to the crash handler.
 extern "C" bool HorizonExceptionDispatch(ThreadExceptionDump* ctx) {
     if (!threadExceptionIsAArch64(ctx)) {
         return false;
@@ -62,22 +153,8 @@ extern "C" bool HorizonExceptionDispatch(ThreadExceptionDump* ctx) {
     return true;
 }
 
-// Reached through the crash trampoline in the entry stub when nothing claimed the fault. Expected to
-// terminate the process.
 extern "C" void __libnx_exception_handler(ThreadExceptionDump* ctx) {
-    std::fprintf(stderr, "Dekopon: unhandled CPU exception\n");
-
-    if (threadExceptionIsAArch64(ctx)) {
-        std::fprintf(stderr, "  error_desc=%08" PRIx32 " esr=%08" PRIx32 "\n", ctx->error_desc,
-                     ctx->esr);
-        std::fprintf(stderr, "  pc =%016" PRIx64 "  lr =%016" PRIx64 "\n", ctx->pc.x, ctx->lr.x);
-        std::fprintf(stderr, "  sp =%016" PRIx64 "  far=%016" PRIx64 "\n", ctx->sp.x, ctx->far.x);
-        for (int i = 0; i < 29; ++i) {
-            std::fprintf(stderr, "  x%-2d=%016" PRIx64 "\n", i, ctx->cpu_gprs[i].x);
-        }
-    } else {
-        std::fprintf(stderr, "  aarch32 exception (pc=%08" PRIx32 ")\n", ctx->pc.w);
-    }
-
-    std::fflush(stderr);
+    BuildReport(ctx);
+    WriteReportToSd();
+    write(STDERR_FILENO, s_report, s_report_len);
 }

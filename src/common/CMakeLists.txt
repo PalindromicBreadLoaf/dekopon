@@ -93,6 +93,7 @@ add_library(citra_common STATIC EXCLUDE_FROM_ALL
     thread.cpp
     thread.h
     thread_queue_list.h
+    thread_worker.cpp
     thread_worker.h
     threadsafe_queue.h
     timer.cpp
