@@ -1,4 +1,4 @@
-// Copyright Citra Emulator Project / Azahar Emulator Project
+// Copyright 2014-2026 Citra Emulator Project / Azahar Emulator Project
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
 
@@ -21,6 +21,7 @@
 #include "common/settings.h"
 #include "common/swap.h"
 #include "core/arm/arm_interface.h"
+#include "core/arm/exception_handler.h"
 #include "core/core.h"
 #ifdef ENABLE_GDBSTUB
 #include "core/gdbstub/gdbstub.h"
@@ -912,8 +913,7 @@ void MemorySystem::UnregisterPageTable(std::shared_ptr<PageTable> page_table) {
 
 template <typename T>
 void MemorySystem::UnmappedAccess(const VAddr vaddr, const T value, bool read) {
-    const bool breaking = Settings::values.break_on_unmapped_memory_access.GetValue();
-    bool debugging = breaking;
+    bool debugging = Settings::values.enable_exception_handler.GetValue();
 #ifdef ENABLE_GDBSTUB
     debugging = debugging || GDBStub::IsConnected();
 #endif
@@ -931,17 +931,16 @@ void MemorySystem::UnmappedAccess(const VAddr vaddr, const T value, bool read) {
 #ifdef ENABLE_GDBSTUB
     if (GDBStub::IsConnected()) {
         GDBStub::Break(SIGSEGV);
-    } else
-#endif
-        if (breaking) {
-        impl->system.SetStatus(Core::System::ResultStatus::ErrorMemoryExceptionRaised,
-                               message.c_str());
     }
-
+#endif
     if (*suppressed != 0) {
         LOG_ERROR(HW_Memory, "{} (+{} suppressed)", message, *suppressed);
     } else {
         LOG_ERROR(HW_Memory, "{}", message);
+    }
+    if (Settings::values.enable_exception_handler) {
+        Core::LogException(impl->system, read ? Core::ExceptionType::UnmappedRead
+                                              : Core::ExceptionType::UnmappedWrite);
     }
 }
 

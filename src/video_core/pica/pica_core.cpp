@@ -1,4 +1,4 @@
-// Copyright Citra Emulator Project / Azahar Emulator Project
+// Copyright 2023-2026 Citra Emulator Project / Azahar Emulator Project
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
 
@@ -797,7 +797,6 @@ void PicaCore::HandleSpecialReg(u32 id, u32 value, bool& stop_requested) {
     case PICA_REG_INDEX(lighting.lut_data[6]):
     case PICA_REG_INDEX(lighting.lut_data[7]): {
         auto& lut_config = regs.internal.lighting.lut_config;
-        ASSERT_MSG(lut_config.index < 256, "lut_config.index exceeded maximum value of 255!");
 
         const u32 prev = std::exchange(lighting.luts[lut_config.type][lut_config.index].raw, value);
         lighting.lut_dirty |= (prev != value) << lut_config.type;
@@ -865,7 +864,8 @@ void PicaCore::HandleSpecialReg(u32 id, u32 value, bool& stop_requested) {
 void PicaCore::WriteInternalRegBatch(u32 id, const u32* values, u32 count, u32 mask,
                                      bool& stop_requested) {
     if (id >= RegsInternal::NUM_REGS) [[unlikely]] {
-        LOG_ERROR(HW_GPU,
+        // Writes to OOB registers are no-op.
+        LOG_DEBUG(HW_GPU,
                   "Commandlist tried to write to invalid register 0x{:03X} repeated 0x{:04X} times"
                   "(mask: {:X})",
                   id, count, mask);
@@ -896,11 +896,16 @@ void PicaCore::WriteInternalRegBatch(u32 id, const u32* values, u32 count, u32 m
 void PicaCore::WriteInternalRegSequential(u32 id, const u32* __restrict values, u32 count, u32 mask,
                                           bool& stop_requested) {
     if (id + count > RegsInternal::NUM_REGS) [[unlikely]] {
-        LOG_ERROR(
+        // Writes to OOB registers are no-op.
+        LOG_DEBUG(
             HW_GPU,
             "Commandlist tried to write to invalid register range 0x{:03X}-0x{:03X} (mask: {:X})",
             id, id + count, mask);
-        return;
+        if (id >= RegsInternal::NUM_REGS) {
+            return;
+        } else {
+            count = RegsInternal::NUM_REGS - id;
+        }
     }
     const u32 write_mask = ExpandBitsToBytes[mask];
     u32* __restrict dst = &regs.internal.reg_array[id];
@@ -944,7 +949,8 @@ void PicaCore::WriteInternalRegSequential(u32 id, const u32* __restrict values, 
 // Handle individual command write.
 void PicaCore::WriteInternalReg(u32 id, u32 value, u32 mask, bool& stop_requested) {
     if (id >= RegsInternal::NUM_REGS) [[unlikely]] {
-        LOG_ERROR(
+        // Writes to OOB registers are no-op.
+        LOG_DEBUG(
             HW_GPU,
             "Commandlist tried to write to invalid register 0x{:03X} (value: {:08X}, mask: {:X})",
             id, value, mask);

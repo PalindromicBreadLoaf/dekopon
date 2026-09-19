@@ -1,4 +1,4 @@
-// Copyright Citra Emulator Project / Azahar Emulator Project
+// Copyright 2023-2026 Citra Emulator Project / Azahar Emulator Project
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
 
@@ -661,10 +661,23 @@ void RasterizerVulkan::SyncTextureUnits(const Framebuffer* framebuffer) {
 
         // If the texture unit is disabled bind a null surface to it
         if (!texture.enabled) {
-            Surface& null_surface = res_cache.GetSurface(VideoCore::NULL_SURFACE_ID);
-            const Sampler& null_sampler = res_cache.GetSampler(VideoCore::NULL_SAMPLER_ID);
-            update_queue.AddImageSampler(texture_set, texture_index, 0, null_surface.ImageView(),
-                                         null_sampler.Handle());
+            switch (texture.config.type.Value()) {
+            case TextureType::TextureCube:
+            case TextureType::ShadowCube: {
+                Surface& null_surface = res_cache.GetSurface(VideoCore::NULL_SURFACE_CUBE_ID);
+                const Sampler& null_sampler = res_cache.GetSampler(VideoCore::NULL_SURFACE_CUBE_ID);
+                update_queue.AddImageSampler(texture_set, texture_index, 0,
+                                             null_surface.ImageView(), null_sampler.Handle());
+                break;
+            }
+            default: {
+                Surface& null_surface = res_cache.GetSurface(VideoCore::NULL_SURFACE_ID);
+                const Sampler& null_sampler = res_cache.GetSampler(VideoCore::NULL_SURFACE_ID);
+                update_queue.AddImageSampler(texture_set, texture_index, 0,
+                                             null_surface.ImageView(), null_sampler.Handle());
+                break;
+            }
+            }
             continue;
         }
 
@@ -704,13 +717,31 @@ void RasterizerVulkan::SyncTextureUnits(const Framebuffer* framebuffer) {
 }
 
 void RasterizerVulkan::SyncUtilityTextures(const Framebuffer* framebuffer) {
-    const bool shadow_rendering = regs.framebuffer.IsShadowRendering();
-    if (!shadow_rendering) {
-        return;
+    const bool shadow_writing = regs.framebuffer.IsShadowRendering();
+    bool shadow_reading = regs.lighting.config0.enable_shadow;
+    // Ensure the shadow-texture slot is actually enabled
+    if (shadow_reading) {
+        const u32 shadow_texture_unit = regs.lighting.config0.shadow_selector.Value();
+        const auto shadow_texture = regs.texturing.GetTextures()[shadow_texture_unit];
+        shadow_reading &= shadow_texture.enabled;
     }
 
     const auto utility_set = pipeline_cache.Acquire(DescriptorHeapType::Utility);
-    update_queue.AddStorageImage(utility_set, 0, framebuffer->ImageView(SurfaceType::Color));
+
+    // Reading and writing are mutually exclusive
+    assert(!(shadow_writing && shadow_reading));
+
+    if (shadow_writing) {
+        update_queue.AddStorageImage(utility_set, 0, framebuffer->ImageView(SurfaceType::Color));
+    } else if (shadow_reading) {
+        const u32 shadow_texture_unit = regs.lighting.config0.shadow_selector.Value();
+        const auto shadow_texture = regs.texturing.GetTextures()[shadow_texture_unit];
+        Surface& shadow_surface = res_cache.GetTextureSurface(shadow_texture);
+        update_queue.AddStorageImage(utility_set, 0, shadow_surface.StorageView());
+    } else {
+        Surface& null_surface = res_cache.GetSurface(VideoCore::NULL_SURFACE_ID);
+        update_queue.AddStorageImage(utility_set, 0, null_surface.StorageView());
+    }
 }
 
 void RasterizerVulkan::BindShadowCube(const Pica::TexturingRegs::FullTextureConfig& texture,

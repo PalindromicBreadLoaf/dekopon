@@ -1215,8 +1215,9 @@ void BuildAdvanced(std::vector<SettingEntry>& out) {
                 v.deterministic_async_operations);
     t << Toggle({"Delay Start For LLE Modules", "Waits for the real sysmodules to come up first."},
                 v.delay_start_for_lle_modules);
-    t << Toggle({"Break On Unmapped Memory", "Stops the emulator when the game walks a bad pointer."},
-                v.break_on_unmapped_memory_access);
+    t << Toggle({"Log Memory Exceptions",
+                 "Dumps guest CPU state when the game walks a bad pointer."},
+                v.enable_exception_handler);
     t << Toggle({"Renderer Debug", "Turns on the graphics backend's validation layers.",
                  EntryFlag::Restart},
                 v.renderer_debug);

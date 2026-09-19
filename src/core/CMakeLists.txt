@@ -1,6 +1,8 @@
 add_library(citra_core STATIC EXCLUDE_FROM_ALL
     3ds.h
     arm/arm_interface.h
+    arm/exception_handler.cpp
+    arm/exception_handler.h
     arm/exclusive_monitor.cpp
     arm/exclusive_monitor.h
     arm/skyeye_common/arm_regformat.h
@@ -478,7 +480,6 @@ add_library(citra_core STATIC EXCLUDE_FROM_ALL
     precompiled_headers.h
     savestate.cpp
     savestate.h
-    savestate_data.h
     system_titles.cpp
     system_titles.h
     tracer/citrace.h

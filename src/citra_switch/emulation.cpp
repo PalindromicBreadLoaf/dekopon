@@ -598,7 +598,7 @@ std::string SaveStateSlotStatus(unsigned int slot) {
         }
         std::string status = fmt::format("{:02}/{:02} {:02}:{:02}", tm.tm_mday, tm.tm_mon + 1,
                                          tm.tm_hour, tm.tm_min);
-        if (info.status == Core::SaveStateInfo::ValidationStatus::RevisionDismatch) {
+        if (info.status == Core::SaveStateInfo::ValidationStatus::RevisionMismatch) {
             status += " (old)";
         }
         return status;
