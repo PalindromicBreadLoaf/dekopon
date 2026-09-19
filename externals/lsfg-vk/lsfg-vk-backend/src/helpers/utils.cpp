@@ -2,6 +2,7 @@
 
 #include "utils.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -23,15 +24,15 @@ ConstantBuffer backend::getDefaultConstantBuffer(
 
 VkExtent2D backend::shift_extent(VkExtent2D extent, uint32_t i) {
     return VkExtent2D{
-        .width = extent.width >> i,
-        .height = extent.height >> i
+        .width = std::max(1U, extent.width >> i),
+        .height = std::max(1U, extent.height >> i)
     };
 }
 
 VkExtent2D backend::add_shift_extent(VkExtent2D extent, uint32_t a, uint32_t i) {
     return VkExtent2D{
-        .width = (extent.width + a) >> i,
-        .height = (extent.height + a) >> i
+        .width = std::max(1U, (extent.width + a) >> i),
+        .height = std::max(1U, (extent.height + a) >> i)
     };
 }
 
