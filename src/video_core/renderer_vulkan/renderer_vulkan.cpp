@@ -2015,6 +2015,7 @@ OverlayDraw RendererVulkan::PrepareQuickMenu(const Layout::FramebufferLayout& la
     constexpr std::array<float, 4> c_highlight = {0.20f, 0.45f, 0.85f, 0.9f};
     constexpr std::array<float, 4> c_title = {1.0f, 1.0f, 1.0f, 1.0f};
     constexpr std::array<float, 4> c_row = {0.82f, 0.85f, 0.92f, 1.0f};
+    constexpr std::array<float, 4> c_header = {0.55f, 0.62f, 0.80f, 1.0f};
     constexpr std::array<float, 4> c_sel = {1.0f, 1.0f, 1.0f, 1.0f};
     constexpr std::array<float, 4> c_footer = {0.60f, 0.63f, 0.72f, 1.0f};
 
@@ -2055,7 +2056,8 @@ OverlayDraw RendererVulkan::PrepareQuickMenu(const Layout::FramebufferLayout& la
         emit(c_accent, s);
     }
 
-    const bool has_selection = n > 0 && state.selected >= 0 && state.selected < n;
+    const bool has_selection = n > 0 && state.selected >= 0 && state.selected < n &&
+                               !state.items[state.selected].is_header;
 
     // Highlight bar behind the selected row.
     if (has_selection) {
@@ -2089,11 +2091,31 @@ OverlayDraw RendererVulkan::PrepareQuickMenu(const Layout::FramebufferLayout& la
     {
         const u32 s = builder.VertexCount();
         for (int i = 0; i < n; ++i) {
-            if (i != state.selected) {
+            if (i != state.selected && !state.items[i].is_header) {
                 add_row(i);
             }
         }
         emit(c_row, s);
+    }
+
+    {
+        const u32 s = builder.VertexCount();
+        for (int i = 0; i < n; ++i) {
+            if (!state.items[i].is_header) {
+                continue;
+            }
+            add_row(i);
+            const float top = rows_top + static_cast<float>(i) * row_h;
+            const float rule_x0 = panel_x0 + pad +
+                                  OverlayBuilder::Measure(state.items[i].label, scale) + em * 0.6f;
+            const float rule_x1 = panel_x1 - pad;
+            const float rule_y = std::round(top + row_h / 2.0f);
+            if (rule_x1 > rule_x0) {
+                builder.AddRect(rule_x0, rule_y, rule_x1,
+                                rule_y + std::max(1.0f, std::round(em / 16.0f)));
+            }
+        }
+        emit(c_header, s);
     }
     if (has_selection) {
         const u32 s = builder.VertexCount();

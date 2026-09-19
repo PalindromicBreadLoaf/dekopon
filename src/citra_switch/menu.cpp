@@ -520,23 +520,23 @@ struct TabRect {
 
 // Lays the page chips out as one centred row, tightening the padding rather than overflowing the
 // content area if the shared font measures wider than the nominal padding allows for.
-std::array<TabRect, NumSettingsPages> SettingsTabRects() {
-    std::array<TabRect, NumSettingsPages> rects{};
+std::array<TabRect, NumCategories> SettingsTabRects() {
+    std::array<TabRect, NumCategories> rects{};
     int text = 0;
-    for (int i = 0; i < NumSettingsPages; ++i) {
-        rects[i].w = g_font.Measure(SettingsPageName(static_cast<SettingsPage>(i)), 18);
+    for (int i = 0; i < NumCategories; ++i) {
+        rects[i].w = g_font.Measure(CategoryName(static_cast<Category>(i)), 18);
         text += rects[i].w;
     }
-    const int available = ContentW() - 48 - (NumSettingsPages - 1) * kTabGap;
-    const int pad = std::clamp((available - text) / (2 * NumSettingsPages), kTabPadMin, kTabPadX);
+    const int available = ContentW() - 48 - (NumCategories - 1) * kTabGap;
+    const int pad = std::clamp((available - text) / (2 * NumCategories), kTabPadMin, kTabPadX);
 
     int total = 0;
-    for (int i = 0; i < NumSettingsPages; ++i) {
+    for (int i = 0; i < NumCategories; ++i) {
         rects[i].w += pad * 2;
         total += rects[i].w + (i > 0 ? kTabGap : 0);
     }
     int x = kContentX + std::max(24, (ContentW() - total) / 2);
-    for (int i = 0; i < NumSettingsPages; ++i) {
+    for (int i = 0; i < NumCategories; ++i) {
         rects[i].x = x;
         x += rects[i].w + kTabGap;
     }
@@ -544,16 +544,16 @@ std::array<TabRect, NumSettingsPages> SettingsTabRects() {
 }
 
 // Where the label sits inside its chip, which follows the same tightening.
-int SettingsTabTextInset(const std::array<TabRect, NumSettingsPages>& rects, int index) {
+int SettingsTabTextInset(const std::array<TabRect, NumCategories>& rects, int index) {
     return (rects[index].w -
-            g_font.Measure(SettingsPageName(static_cast<SettingsPage>(index)), 18)) /
+            g_font.Measure(CategoryName(static_cast<Category>(index)), 18)) /
            2;
 }
 
 bool CompactTabStrip() {
-    int total = (NumSettingsPages - 1) * kTabGap + NumSettingsPages * 2 * kTabPadMin;
-    for (int i = 0; i < NumSettingsPages; ++i) {
-        total += g_font.Measure(SettingsPageName(static_cast<SettingsPage>(i)), 18);
+    int total = (NumCategories - 1) * kTabGap + NumCategories * 2 * kTabPadMin;
+    for (int i = 0; i < NumCategories; ++i) {
+        total += g_font.Measure(CategoryName(static_cast<Category>(i)), 18);
     }
     return total > ContentW() - 48;
 }
@@ -564,10 +564,10 @@ std::optional<int> SettingsTabHitTest(int x, int y, int active) {
     }
     if (CompactTabStrip()) {
         const int step = x < kContentX + ContentW() / 2 ? -1 : 1;
-        return (active + step + NumSettingsPages) % NumSettingsPages;
+        return (active + step + NumCategories) % NumCategories;
     }
     const auto rects = SettingsTabRects();
-    for (int i = 0; i < NumSettingsPages; ++i) {
+    for (int i = 0; i < NumCategories; ++i) {
         if (x >= rects[i].x && x < rects[i].x + rects[i].w) {
             return i;
         }
@@ -1416,11 +1416,15 @@ private:
     bool artic_state_loaded = false;
 
     // Settings tab.
-    SettingsPage settings_page{SettingsPage::General};
+    Category settings_page{Category::General};
     std::vector<SettingsRow> settings_rows;
     // Kept per page so switching back lands where the cursor was left.
-    std::array<int, NumSettingsPages> settings_sel{};
-    std::array<int, NumSettingsPages> settings_scroll{};
+    std::array<int, NumCategories> settings_sel{};
+    std::array<int, NumCategories> settings_scroll{};
+    bool settings_search_open = false;
+    std::string settings_search_query;
+    int settings_search_sel = 0;
+    int settings_search_scroll = 0;
 
     Repeater repeater;
     Framebuffer fb{};
@@ -1570,6 +1574,7 @@ private:
             RefreshInstallList();
         }
         if (tab == Tab::Settings) {
+            RefreshShaderCacheSize();
             SetSettingsPage(settings_page);
         }
         if (tab == Tab::Artic && !artic_state_loaded) {
@@ -1579,20 +1584,63 @@ private:
         }
     }
 
-    void SetSettingsPage(SettingsPage page) {
+    void SetSettingsPage(Category page) {
+        settings_search_open = false;
+        RefreshUniqueDataStatus();
         settings_page = page;
-        settings_rows = BuildSettingsPage(page);
-        const int last = std::max(0, static_cast<int>(settings_rows.size()) - 1);
-        SettingsSel() = std::clamp(SettingsSel(), 0, last);
+        settings_rows = BuildCategoryRows(page);
+        SettingsSel() = SettleSettingsSelection(SettingsSel(), +1);
         ScrollSettingsIntoView();
     }
 
+    void OpenSettingsSearch() {
+        const auto text = PromptSettingText("Search settings", "Name of a setting",
+                                            settings_search_query, 40);
+        if (!text) {
+            return;
+        }
+        settings_search_query = *text;
+        settings_rows = BuildSearchRows(settings_search_query);
+        settings_search_open = true;
+        settings_search_sel = 0;
+        settings_search_scroll = 0;
+        if (settings_rows.empty()) {
+            ShowNotice("No setting matches \"" + settings_search_query + "\"", true);
+            CloseSettingsSearch();
+        }
+    }
+
+    void CloseSettingsSearch() {
+        SetSettingsPage(settings_page);
+    }
+
     int& SettingsSel() {
-        return settings_sel[static_cast<std::size_t>(settings_page)];
+        return settings_search_open ? settings_search_sel
+                                    : settings_sel[static_cast<std::size_t>(settings_page)];
     }
 
     int& SettingsScroll() {
-        return settings_scroll[static_cast<std::size_t>(settings_page)];
+        return settings_search_open ? settings_search_scroll
+                                    : settings_scroll[static_cast<std::size_t>(settings_page)];
+    }
+
+    int SettleSettingsSelection(int index, int dir) const {
+        const int count = static_cast<int>(settings_rows.size());
+        if (count == 0) {
+            return 0;
+        }
+        index = std::clamp(index, 0, count - 1);
+        for (int i = index; i >= 0 && i < count; i += dir) {
+            if (!settings_rows[i].is_header) {
+                return i;
+            }
+        }
+        for (int i = index; i >= 0 && i < count; i -= dir) {
+            if (!settings_rows[i].is_header) {
+                return i;
+            }
+        }
+        return index;
     }
 
     // True while the edited scan inputs differ from what the last scan used.
@@ -1968,7 +2016,8 @@ private:
     void ScrollSettingsIntoView() {
         int& scroll = SettingsScroll();
         const int sel = SettingsSel();
-        scroll = std::clamp(scroll, std::max(0, sel - SettingsVisibleRows() + 1), sel);
+        const int top = sel > 0 && settings_rows[sel - 1].is_header ? sel - 1 : sel;
+        scroll = std::clamp(scroll, std::max(0, sel - SettingsVisibleRows() + 1), top);
     }
 
     void OpenLayoutPicker() {
@@ -1977,8 +2026,8 @@ private:
     }
 
     void StepSettingsPage(int dir) {
-        SetSettingsPage(static_cast<SettingsPage>(
-            (static_cast<int>(settings_page) + dir + NumSettingsPages) % NumSettingsPages));
+        SetSettingsPage(static_cast<Category>(
+            (static_cast<int>(settings_page) + dir + NumCategories) % NumCategories));
     }
 
     void OpenSettingsModal(SettingsModal modal) {
@@ -2169,6 +2218,10 @@ private:
 
     // `nav` moves the cursor; `dpad_nav` is the d-pad-only subset that is allowed to edit a value.
     bool HandleSettings(u64 down, u32 nav, u32 dpad_nav) {
+        if (down & HidNpadButton_Y) {
+            OpenSettingsSearch();
+            return false;
+        }
         if (down & HidNpadButton_L) {
             StepSettingsPage(-1);
         }
@@ -2182,15 +2235,23 @@ private:
             return false;
         }
 
-        const int count = static_cast<int>(settings_rows.size());
         int& sel = SettingsSel();
         if (nav & DirUp) {
-            sel = std::max(0, sel - 1);
+            sel = SettleSettingsSelection(std::max(0, sel - 1), -1);
         }
         if (nav & DirDown) {
-            sel = std::min(count - 1, sel + 1);
+            sel = SettleSettingsSelection(
+                std::min(static_cast<int>(settings_rows.size()) - 1, sel + 1), +1);
         }
         ScrollSettingsIntoView();
+
+        const auto back = [this] {
+            if (settings_search_open) {
+                CloseSettingsSearch();
+            } else {
+                EnterRail();
+            }
+        };
 
         const SettingsRow& row = settings_rows[sel];
         if (row.modal != SettingsModal::None) {
@@ -2198,7 +2259,7 @@ private:
                 OpenSettingsModal(row.modal);
             }
             if (down & HidNpadButton_B) {
-                EnterRail();
+                back();
             }
             return false;
         }
@@ -2208,12 +2269,16 @@ private:
             row.step(-1);
             settings_dirty = true;
         }
-        if ((dpad_nav & DirRight) || (down & HidNpadButton_A)) {
+        if (dpad_nav & DirRight) {
             row.step(+1);
             settings_dirty = true;
         }
+        if (down & HidNpadButton_A) {
+            row.step(row.boolean && row.boolean() ? -1 : +1);
+            settings_dirty = true;
+        }
         if (down & HidNpadButton_B) {
-            EnterRail();
+            back();
         }
         return false;
     }
@@ -2285,6 +2350,7 @@ private:
             "Clear",
             [this] {
                 const u64 freed = ClearShaderCache();
+                RefreshShaderCacheSize();
                 SetSettingsPage(settings_page);
                 ShowNotice("Shader cache cleared, " + FormatSize(freed) + " freed", false);
             }};
@@ -2848,20 +2914,28 @@ private:
                 install_sel = row;
             }
         } else if (tab == Tab::Settings) {
-            if (const std::optional<int> page =
-                    SettingsTabHitTest(tx, ty, static_cast<int>(settings_page))) {
-                SetSettingsPage(static_cast<SettingsPage>(*page));
+            const std::optional<int> page =
+                settings_search_open
+                    ? std::optional<int>{}
+                    : SettingsTabHitTest(tx, ty, static_cast<int>(settings_page));
+            if (page) {
+                SetSettingsPage(static_cast<Category>(*page));
                 return;
             }
             const int visible = (ty - kSettingsTop) / kSettingsRowStride;
             const int row = SettingsScroll() + visible;
             if (ty >= kSettingsTop && visible < SettingsVisibleRows() && row >= 0 &&
-                row < static_cast<int>(settings_rows.size())) {
+                row < static_cast<int>(settings_rows.size()) && !settings_rows[row].is_header) {
                 SettingsSel() = row;
                 if (settings_rows[row].modal != SettingsModal::None) {
                     OpenSettingsModal(settings_rows[row].modal);
                 } else {
-                    settings_rows[row].step(tx > kContentX + ContentW() / 2 ? +1 : -1);
+                    const SettingsRow& touched = settings_rows[row];
+                    if (touched.boolean) {
+                        touched.step(touched.boolean() ? -1 : +1);
+                    } else {
+                        touched.step(tx > kContentX + ContentW() / 2 ? +1 : -1);
+                    }
                     settings_dirty = true;
                 }
             }
@@ -3681,8 +3755,18 @@ private:
     }
 
     void DrawSettingsTabs(Canvas& c) {
+        if (settings_search_open) {
+            const std::string name = "Search: " + settings_search_query;
+            const int baseline = CenterBaseline(kTabStripTop, kTabStripH, 18);
+            const int w = std::min(ContentW() - 48, g_font.Measure(name, 18) + kTabPadX * 2);
+            const int x = kContentX + (ContentW() - w) / 2;
+            c.FillRoundRect(x, kTabStripTop, w, kTabStripH, kTabStripH / 2, kColAccent);
+            g_font.Draw(c, x + kTabPadX, baseline,
+                        g_font.Truncate(name, 18, w - kTabPadX * 2), 18, kColOnAccent);
+            return;
+        }
         if (CompactTabStrip()) {
-            const char* name = SettingsPageName(settings_page);
+            const char* name = CategoryName(settings_page);
             const int baseline = CenterBaseline(kTabStripTop, kTabStripH, 18);
             const int w = g_font.Measure(name, 18) + kTabPadX * 2;
             const int x = kContentX + (ContentW() - w) / 2;
@@ -3693,13 +3777,13 @@ private:
             return;
         }
         const auto rects = SettingsTabRects();
-        for (int i = 0; i < NumSettingsPages; ++i) {
+        for (int i = 0; i < NumCategories; ++i) {
             const bool on = i == static_cast<int>(settings_page);
             if (on) {
                 c.FillRoundRect(rects[i].x, kTabStripTop, rects[i].w, kTabStripH, kTabStripH / 2,
                                 kColAccent);
             }
-            const char* name = SettingsPageName(static_cast<SettingsPage>(i));
+            const char* name = CategoryName(static_cast<Category>(i));
             g_font.Draw(c, rects[i].x + SettingsTabTextInset(rects, i),
                         CenterBaseline(kTabStripTop, kTabStripH, 18), name, 18,
                         on ? kColOnAccent : kColTextDim);
@@ -3718,17 +3802,26 @@ private:
         const int w = ContentW() - 48;
         const int last = std::min(count, scroll + SettingsVisibleRows());
         for (int i = scroll; i < last; ++i) {
+            const SettingsRow& row = settings_rows[i];
             const int y = kSettingsTop + (i - scroll) * kSettingsRowStride;
+            if (row.is_header) {
+                const int baseline = CenterBaseline(y, kRowH, 17);
+                const int label_w = g_font.Measure(row.label, 17);
+                g_font.Draw(c, x + 20, baseline, row.label, 17, kColAccent);
+                const int rule_x = x + 20 + label_w + 12;
+                c.FillRect(rule_x, y + kRowH / 2 - 1, std::max(0, x + w - 24 - rule_x), 1,
+                           kColRail);
+                continue;
+            }
             const bool on = i == sel;
             if (on) {
                 c.FillRoundRect(x, y, w, kRowH, 10, content_focus ? kColSurfaceHi : kColSurface);
                 c.FillRoundRect(x, y + 8, 4, kRowH - 16, 2,
                                 content_focus ? kColAccent : kColBadge);
             }
-            g_font.Draw(c, x + 20, CenterBaseline(y, kRowH, 22), settings_rows[i].label, 22,
-                        kColText);
-            const std::string value = settings_rows[i].value();
-            const int max_value_w = w - 44 - g_font.Measure(settings_rows[i].label, 22);
+            g_font.Draw(c, x + 20, CenterBaseline(y, kRowH, 22), row.label, 22, kColText);
+            const std::string value = row.value();
+            const int max_value_w = w - 44 - g_font.Measure(row.label, 22);
             const std::string shown = g_font.Truncate(value, 22, std::max(60, max_value_w));
             const int vw = g_font.Measure(shown, 22);
             g_font.Draw(c, x + w - 24 - vw, CenterBaseline(y, kRowH, 22), shown, 22,
@@ -3738,26 +3831,34 @@ private:
                           kSettingsRowStride, count, scroll);
 
         const int footer_y = ContentBottom() - kSettingsFooterH;
-        const std::string backend =
-            std::string{"Graphics backend: "} + ActiveGraphicsBackendName();
-        g_font.Draw(c, x + 20, footer_y + 16, backend, 18, kColTextDim);
-        g_font.Draw(c, x + 20, footer_y + 42, "Changes apply the next time you launch a game.", 18,
-                    kColTextDim);
+        const bool has_sel = sel >= 0 && sel < count && !settings_rows[sel].is_header;
+        const std::string description = has_sel ? settings_rows[sel].description : std::string{};
+        g_font.Draw(c, x + 20, footer_y + 16, g_font.Truncate(description, 18, w - 40), 18,
+                    kColText);
+        const std::string note =
+            has_sel && settings_rows[sel].needs_restart
+                ? std::string{"Takes effect the next time you launch a game."}
+                : std::string{"Graphics backend: "} + ActiveGraphicsBackendName();
+        g_font.Draw(c, x + 20, footer_y + 42, note, 18, kColTextDim);
 
         if (focus == Focus::Rail) {
             DrawRailHints(c);
         } else {
             int hx = HintX();
             const int hy = ContentBottom() + (kHintH - 26) / 2;
-            const bool modal = count > 0 && settings_rows[sel].modal != SettingsModal::None;
+            const bool modal = has_sel && settings_rows[sel].modal != SettingsModal::None;
             if (modal) {
                 hx += DrawHint(c, hx, hy, "A", "Configure") + 22;
+            } else if (has_sel && settings_rows[sel].boolean) {
+                hx += DrawHint(c, hx, hy, "A", "Toggle") + 22;
             } else {
                 hx += DrawHint(c, hx, hy, "<>", "Change") + 22;
-                hx += DrawHint(c, hx, hy, "A", "Next") + 22;
             }
-            hx += DrawHint(c, hx, hy, "L R", "Page") + 22;
-            hx += DrawHint(c, hx, hy, "B", "Menu") + 22;
+            hx += DrawHint(c, hx, hy, "Y", "Search") + 22;
+            if (!settings_search_open) {
+                hx += DrawHint(c, hx, hy, "L R", "Page") + 22;
+            }
+            hx += DrawHint(c, hx, hy, "B", settings_search_open ? "Back" : "Menu") + 22;
             DrawHint(c, hx, hy, "+ -", "Exit");
         }
     }

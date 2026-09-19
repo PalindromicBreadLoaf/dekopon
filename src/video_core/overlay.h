@@ -14,11 +14,11 @@
 // the game.
 namespace VideoCore {
 
-// One line in the overlay. Actions (Resume, Exit, etc.) carry no value.
 struct OverlayMenuItem {
     std::string label;
     std::string value;
     bool is_action{};
+    bool is_header{};
 };
 
 struct OverlayMenuState {

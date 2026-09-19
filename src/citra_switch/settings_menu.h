@@ -8,84 +8,26 @@
 #include <string>
 #include <vector>
 
-// The rows behind the Settings tab.
+#include "citra_switch/settings_registry.h"
+
 namespace SwitchFrontend {
 
-enum class SettingsPage {
-    General,
-    System,
-    Console,
-    Graphics,
-    Enhancements,
-    Audio,
-    Layout,
-    Controls,
-    Storage,
-    Experimental,
-    Debug,
-    Count,
-};
-
-inline constexpr int NumSettingsPages = static_cast<int>(SettingsPage::Count);
-
-// A row that hands off to a modal owned by the menu instead of cycling a value in place.
-enum class SettingsModal {
-    None,
-    LayoutCycle,
-    ControllerMap,
-    LogFilter,
-    ResetDefaults,
-    ClearShaderCache,
-    CheckForUpdates,
-    ReleaseNotes,
-    Username,
-    Country,
-    FixedClock,
-    InitTicksValue,
-    ConsoleId,
-    MacAddress,
-    UnlinkConsole,
-    // Ordered to match UniqueDataFile
-    InstallSecureInfo,
-    InstallFriendCodeSeed,
-    InstallOtp,
-    InstallMovable,
-};
-
 struct SettingsRow {
-    const char* label;
+    std::string label;
     std::function<std::string()> value;
-    std::function<void(int dir)> step; // Empty when `modal` is set.
+    std::function<void(int dir)> step;
     SettingsModal modal{SettingsModal::None};
-    std::function<bool()> boolean; // Set on On/Off rows.
+    std::function<bool()> boolean;
+    std::string description;
+    bool is_header{};
+    bool needs_restart{};
 };
 
-const char* SettingsPageName(SettingsPage page);
+std::vector<SettingsRow> BuildCategoryRows(Category category);
 
-// The rows of `page`, in display order. Values are read live through the returned callbacks, so
-// the list only has to be rebuilt when the page changes.
-std::vector<SettingsRow> BuildSettingsPage(SettingsPage page);
+std::vector<SettingsRow> BuildQuickRows(QuickSection section);
 
-// The in-game quick menu's settings-backed pages, in display order. These carry only the subset
-// of the pages above that both takes effect without a reboot and is worth reaching for while ingame.
-enum class QuickPage {
-    Display,
-    Graphics,
-    Stereo,
-    Audio,
-    Input,
-    System,
-    Count,
-};
-
-inline constexpr int NumQuickPages = static_cast<int>(QuickPage::Count);
-
-const char* QuickPageName(QuickPage page);
-
-std::vector<SettingsRow> BuildQuickPage(QuickPage page);
-
-// The backend the next launch will actually use, which is not always the configured one.
-const char* ActiveGraphicsBackendName();
+std::vector<SettingsRow> BuildSearchRows(const std::string& query);
 
 // The log filter string, and applying a new one to the running logger.
 std::string GetLogFilter();
@@ -94,6 +36,24 @@ void SetLogFilter(const std::string& filter);
 // The 3DS profile name
 std::string GetProfileUsername();
 void SetProfileUsername(const std::string& name);
+
+enum class ProfileValue {
+    BirthMonth,
+    BirthDay,
+    Language,
+    SoundMode,
+};
+
+int GetProfileValue(ProfileValue field);
+void SetProfileValue(ProfileValue field, int value);
+
+int ProfileBirthMonthLength();
+
+bool IsSystemSetupNeeded();
+void SetSystemSetupNeeded(bool needed);
+
+int GetPlayCoins();
+void SetPlayCoins(int coins);
 
 // One selectable entry in the country picker. `code` is the raw 3DS country code.
 struct CountryOption {
@@ -105,6 +65,7 @@ struct CountryOption {
 const std::vector<CountryOption>& CountryOptions();
 int GetProfileCountry();
 void SetProfileCountry(int code);
+const char* ProfileCountryName();
 
 // False when the country does not belong to the configured console region.
 bool IsCountryValidForRegion(int code);

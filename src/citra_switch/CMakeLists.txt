@@ -15,7 +15,6 @@ add_executable(citra_switch
     citra_switch.cpp
     config.cpp
     config.h
-    default_ini.h
     emu_window.cpp
     emu_window.h
     emulation.cpp
@@ -39,6 +38,8 @@ add_executable(citra_switch
     save_manager.h
     settings_menu.cpp
     settings_menu.h
+    settings_registry.cpp
+    settings_registry.h
     updater.cpp
     updater.h
     usb_storage.cpp

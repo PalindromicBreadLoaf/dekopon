@@ -30,9 +30,13 @@ namespace SwitchFrontend {
 namespace {
 
 // The kind of row. Setting rows index into the current page's row list, cheat rows into the
-// engine's cheat list, and save state rows into the slots.
+// engine's cheat list, save state rows into the slots, and section rows into Page.
 enum class Item {
     Setting,
+    Section,
+    Separator,
+    SaveHere,
+    LoadHere,
     Cheat,
     CheatsEmpty,
     SaveStateSlot,
@@ -52,9 +56,10 @@ struct Row {
     int index = -1;
 };
 
-// The overlay is split into pages with L/R used to cycle between them. Everything up to States
-// is a settings page and maps onto the QuickPage of the same ordinal.
+// The overlay opens on Home, which carries the things worth reaching for mid-game and links out
+// to the rest. The settings pages are numbered to match QuickSection so one cast converts them.
 enum class Page {
+    Home,
     Display,
     Graphics,
     Stereo,
@@ -65,24 +70,28 @@ enum class Page {
     Cheats,
     Amiibo,
     Camera,
+    Count,
 };
 
-constexpr std::array<Page, NumQuickPages + 4> kPages = {
-    Page::Display, Page::Graphics, Page::Stereo, Page::Audio,  Page::Input,
-    Page::System,  Page::States,   Page::Cheats, Page::Amiibo, Page::Camera,
-};
+constexpr int NumPages = static_cast<int>(Page::Count);
 
-static_assert(static_cast<int>(Page::States) == NumQuickPages,
-              "the settings pages have to lead, in QuickPage order");
+// Every page but Home, which L/R cycles through once you are inside one.
+constexpr int NumSections = NumPages - 1;
+
+static_assert(static_cast<int>(Page::Display) == static_cast<int>(QuickSection::Display) &&
+                  static_cast<int>(Page::System) == static_cast<int>(QuickSection::System),
+              "the settings pages have to line up with QuickSection");
 
 bool IsSettingsPage(Page page) {
-    return static_cast<int>(page) < NumQuickPages;
+    return page >= Page::Display && page <= Page::System;
 }
 
 const char* PageName(Page page) {
     switch (page) {
+    case Page::Home:
+        return "Quick Menu";
     case Page::States:
-        return "States";
+        return "Save States";
     case Page::Cheats:
         return "Cheats";
     case Page::Amiibo:
@@ -90,9 +99,11 @@ const char* PageName(Page page) {
     case Page::Camera:
         return "Camera";
     default:
-        return QuickPageName(static_cast<QuickPage>(page));
+        return QuickSectionName(static_cast<QuickSection>(page));
     }
 }
+
+constexpr int kMaxVisibleRows = 10;
 
 // Cheats past this many spill onto further sub-pages.
 constexpr int kCheatsPerPage = 8;
@@ -115,6 +126,8 @@ int s_amiibo_page = 0;
 int s_camera_page = 0;
 std::vector<Row> s_rows;
 std::vector<SettingsRow> s_settings;
+int s_scroll = 0;
+int s_home_slot = 0;
 std::vector<FileEntry> s_amiibos;
 std::vector<FileEntry> s_camera_images;
 bool s_cheats_dirty = false;
@@ -243,7 +256,7 @@ void StepCameraTarget(int dir) {
 }
 
 Page CurrentPage() {
-    return kPages[static_cast<std::size_t>(s_page)];
+    return static_cast<Page>(std::clamp(s_page, 0, NumPages - 1));
 }
 
 Cheats::CheatEngine* GetCheatEngine() {
@@ -310,18 +323,32 @@ void PersistCheats() {
 }
 
 // Rebuilds the visible rows for the active page and keeps the cursor in range.
+void BuildHomeRows() {
+    s_rows.push_back({Item::Resume});
+    s_rows.push_back({Item::ExitGame});
+    s_rows.push_back({Item::SaveHere});
+    s_rows.push_back({Item::LoadHere});
+    s_rows.push_back({Item::Separator, 0});
+    for (int page = static_cast<int>(Page::Display); page <= static_cast<int>(Page::System);
+         ++page) {
+        s_rows.push_back({Item::Section, page});
+    }
+    s_rows.push_back({Item::Separator, 1});
+    for (int page = static_cast<int>(Page::States); page < NumPages; ++page) {
+        s_rows.push_back({Item::Section, page});
+    }
+}
+
 void RebuildRows() {
     s_rows.clear();
     s_settings.clear();
     const Page page = CurrentPage();
-    if (IsSettingsPage(page)) {
-        s_settings = BuildQuickPage(static_cast<QuickPage>(page));
+    if (page == Page::Home) {
+        BuildHomeRows();
+    } else if (IsSettingsPage(page)) {
+        s_settings = BuildQuickRows(static_cast<QuickSection>(page));
         for (int i = 0; i < static_cast<int>(s_settings.size()); ++i) {
             s_rows.push_back({Item::Setting, i});
-        }
-        if (page == Page::System) {
-            s_rows.push_back({Item::Resume});
-            s_rows.push_back({Item::ExitGame});
         }
     } else if (page == Page::States) {
         s_state_page = std::clamp(s_state_page, 0, StatePageCount() - 1);
@@ -368,24 +395,53 @@ void RebuildRows() {
         s_rows.push_back({Item::ClearCamera});
     }
     s_selected = std::clamp(s_selected, 0, static_cast<int>(s_rows.size()) - 1);
+    if (s_rows.empty()) {
+        return;
+    }
+    if (s_rows[static_cast<std::size_t>(s_selected)].item == Item::Separator) {
+        ++s_selected;
+    }
+    const int max_scroll = std::max(0, static_cast<int>(s_rows.size()) - kMaxVisibleRows);
+    s_scroll = std::clamp(s_scroll, std::max(0, s_selected - kMaxVisibleRows + 1),
+                          std::min(s_selected, max_scroll));
 }
 
-// Rows that only respond to A, and as such carry no value.
+// Rows that only respond to A.
 bool IsAction(const Row& row) {
     switch (row.item) {
     case Item::Setting:
     case Item::Cheat:
     case Item::CameraTargetRow:
+    case Item::SaveHere:
+    case Item::LoadHere:
         return false;
     default:
         return true;
     }
 }
 
+const char* SeparatorLabel(int index) {
+    return index == 0 ? "Settings" : "Game";
+}
+
+std::string SlotSummary(int slot) {
+    const std::string& status = s_slot_status[static_cast<std::size_t>(slot)];
+    return SaveStateSlotName(static_cast<unsigned int>(slot)) +
+           (status.empty() ? " - empty" : " - " + status);
+}
+
 std::string Label(const Row& row) {
     switch (row.item) {
     case Item::Setting:
         return s_settings[static_cast<std::size_t>(row.index)].label;
+    case Item::Section:
+        return std::string{PageName(static_cast<Page>(row.index))} + "  >";
+    case Item::Separator:
+        return SeparatorLabel(row.index);
+    case Item::SaveHere:
+        return "Save State";
+    case Item::LoadHere:
+        return "Load State";
     case Item::Cheat:
         return CheatName(row.index);
     case Item::CheatsEmpty:
@@ -418,6 +474,9 @@ std::string Value(const Row& row) {
     switch (row.item) {
     case Item::Setting:
         return s_settings[static_cast<std::size_t>(row.index)].value();
+    case Item::SaveHere:
+    case Item::LoadHere:
+        return SlotSummary(s_home_slot);
     case Item::Cheat:
         return CheatEnabled(row.index) ? "On" : "Off";
     case Item::SaveStateSlot: {
@@ -441,6 +500,11 @@ void Adjust(const Row& row, int dir) {
     case Item::Setting:
         s_settings[static_cast<std::size_t>(row.index)].step(dir);
         break;
+    case Item::SaveHere:
+    case Item::LoadHere:
+        s_home_slot = (s_home_slot + dir + static_cast<int>(Core::SaveStateSlotCount)) %
+                      static_cast<int>(Core::SaveStateSlotCount);
+        break;
     case Item::Cheat:
         ToggleCheat(row.index);
         break;
@@ -462,54 +526,68 @@ void Activate(const Row& row) {
     setting.step(setting.boolean && setting.boolean() ? -1 : 1);
 }
 
+std::string ListSuffix(int page, int pages) {
+    return pages > 1 ? "  List " + std::to_string(page + 1) + "/" + std::to_string(pages)
+                     : std::string{};
+}
+
+const char* HintFor(Page page) {
+    switch (page) {
+    case Page::Home:
+        return "A Select   +/- Close";
+    case Page::States:
+        return "A Load   X Save   Y Delete   ZL/ZR List   B Back";
+    case Page::Cheats:
+        return "A Toggle   ZL/ZR List   B Back";
+    case Page::Amiibo:
+        return "A Load/Remove   ZL/ZR List   B Back";
+    case Page::Camera:
+        return "A Select   ZL/ZR List   B Back";
+    default:
+        return "A Change   L/R Section   B Back";
+    }
+}
+
 void Repaint() {
+    const Page page = CurrentPage();
     VideoCore::OverlayMenuState state;
     state.visible = s_open.load(std::memory_order_relaxed);
-    state.selected = s_selected;
-    state.title = std::string("Quick Menu - ") + PageName(CurrentPage()) + " (" +
-                  std::to_string(s_page + 1) + "/" + std::to_string(kPages.size()) + ")";
-    if (CurrentPage() == Page::Cheats) {
-        const int cheat_pages = CheatPageCount();
-        if (cheat_pages > 1) {
-            state.title += "  List " + std::to_string(s_cheat_page + 1) + "/" +
-                           std::to_string(cheat_pages);
-            state.hint = "A Toggle   L/R Page   ZL/ZR List   +/- Close";
-        } else {
-            state.hint = "A Toggle   L/R Page   +/- Close";
-        }
-    } else if (CurrentPage() == Page::States) {
-        const int state_pages = StatePageCount();
-        if (state_pages > 1) {
-            state.title +=
-                "  List " + std::to_string(s_state_page + 1) + "/" + std::to_string(state_pages);
-        }
-        state.hint = "A Load   X Save   Y Delete   ZL/ZR List   L/R Page";
-    } else if (CurrentPage() == Page::Amiibo) {
-        const int amiibo_pages = AmiiboPageCount();
-        if (amiibo_pages > 1) {
-            state.title +=
-                "  List " + std::to_string(s_amiibo_page + 1) + "/" + std::to_string(amiibo_pages);
-            state.hint = "A Load/Remove   L/R Page   ZL/ZR List";
-        } else {
-            state.hint = "A Load/Remove   L/R Page";
-        }
-    } else if (CurrentPage() == Page::Camera) {
-        const int camera_pages = CameraPageCount();
-        if (camera_pages > 1) {
-            state.title +=
-                "  List " + std::to_string(s_camera_page + 1) + "/" + std::to_string(camera_pages);
-            state.hint = "A Select   L/R Page   ZL/ZR List";
-        } else {
-            state.hint = "A Select   L/R Page";
-        }
-    } else {
-        state.hint = "A Change   L/R Page   +/- Close";
+    state.title = page == Page::Home ? std::string{PageName(page)}
+                                     : std::string{"Quick Menu > "} + PageName(page);
+    switch (page) {
+    case Page::Cheats:
+        state.title += ListSuffix(s_cheat_page, CheatPageCount());
+        break;
+    case Page::States:
+        state.title += ListSuffix(s_state_page, StatePageCount());
+        break;
+    case Page::Amiibo:
+        state.title += ListSuffix(s_amiibo_page, AmiiboPageCount());
+        break;
+    case Page::Camera:
+        state.title += ListSuffix(s_camera_page, CameraPageCount());
+        break;
+    default:
+        break;
     }
-    state.items.reserve(s_rows.size());
-    for (const Row& row : s_rows) {
+    state.hint = HintFor(page);
+
+    const int count = static_cast<int>(s_rows.size());
+    const int visible = std::min(count, kMaxVisibleRows);
+    const int first = std::clamp(s_scroll, 0, std::max(0, count - visible));
+    if (count > visible) {
+        state.hint += "   " + std::to_string(first + 1) + "-" + std::to_string(first + visible) +
+                      " of " + std::to_string(count);
+    }
+
+    state.selected = s_selected - first;
+    state.items.reserve(static_cast<std::size_t>(visible));
+    for (int i = first; i < first + visible; ++i) {
+        const Row& row = s_rows[static_cast<std::size_t>(i)];
         std::string value = Value(row);
         const bool no_value = value.empty();
-        state.items.push_back({Label(row), std::move(value), no_value});
+        state.items.push_back(
+            {Label(row), std::move(value), no_value, row.item == Item::Separator});
     }
     VideoCore::SetOverlayMenuState(state);
 }
@@ -532,8 +610,9 @@ void SetPauseInQuickMenu(bool enabled) {
 }
 
 void OpenQuickMenu() {
-    s_page = 0;
+    s_page = static_cast<int>(Page::Home);
     s_selected = 0;
+    s_scroll = 0;
     s_cheat_page = 0;
     s_state_page = 0;
     s_amiibo_page = 0;
@@ -570,83 +649,137 @@ void ToggleQuickMenu() {
     }
 }
 
+namespace {
+
+void EnterPage(Page page) {
+    s_page = static_cast<int>(page);
+    s_selected = 0;
+    s_scroll = 0;
+    switch (page) {
+    case Page::States:
+        RefreshSaveStates();
+        break;
+    case Page::Amiibo:
+        RefreshAmiibos();
+        break;
+    case Page::Camera:
+        RefreshCameraImages();
+        break;
+    default:
+        break;
+    }
+    RebuildRows();
+}
+
+void ClampScroll() {
+    const int count = static_cast<int>(s_rows.size());
+    const int visible = std::min(count, kMaxVisibleRows);
+    s_scroll = std::clamp(s_scroll, s_selected - visible + 1, s_selected);
+    s_scroll = std::clamp(s_scroll, 0, std::max(0, count - visible));
+}
+
+void MoveSelection(int dir) {
+    const int count = static_cast<int>(s_rows.size());
+    if (count == 0) {
+        return;
+    }
+    for (int step = 0; step < count; ++step) {
+        s_selected = (s_selected + dir + count) % count;
+        if (s_rows[static_cast<std::size_t>(s_selected)].item != Item::Separator) {
+            break;
+        }
+    }
+    ClampScroll();
+}
+
+bool StepSubList(const QuickMenuNav& nav) {
+    if (!nav.page_prev && !nav.page_next) {
+        return false;
+    }
+    const int dir = nav.page_next ? 1 : -1;
+    int* target = nullptr;
+    int pages = 0;
+    switch (CurrentPage()) {
+    case Page::Cheats:
+        target = &s_cheat_page;
+        pages = CheatPageCount();
+        break;
+    case Page::States:
+        target = &s_state_page;
+        pages = StatePageCount();
+        break;
+    case Page::Amiibo:
+        target = &s_amiibo_page;
+        pages = AmiiboPageCount();
+        break;
+    case Page::Camera:
+        target = &s_camera_page;
+        pages = CameraPageCount();
+        break;
+    default:
+        return false;
+    }
+    *target = (*target + dir + pages) % pages;
+    s_selected = 0;
+    s_scroll = 0;
+    RebuildRows();
+    return true;
+}
+
+} // namespace
+
 QuickMenuAction UpdateQuickMenu(const QuickMenuNav& nav) {
     if (!IsQuickMenuOpen()) {
         return QuickMenuAction::None;
     }
 
     if (nav.cancel) {
+        if (CurrentPage() != Page::Home) {
+            const int came_from = s_page;
+            EnterPage(Page::Home);
+            for (int i = 0; i < static_cast<int>(s_rows.size()); ++i) {
+                const Row& row = s_rows[static_cast<std::size_t>(i)];
+                if (row.item == Item::Section && row.index == came_from) {
+                    s_selected = i;
+                    break;
+                }
+            }
+            ClampScroll();
+            Repaint();
+            return QuickMenuAction::None;
+        }
         CloseQuickMenu();
         return QuickMenuAction::Close;
     }
 
     bool changed = false;
 
-    // L/R cycle through the menu's pages.
-    if (nav.tab_prev != nav.tab_next) {
-        const int count = static_cast<int>(kPages.size());
-        s_page = (s_page + (nav.tab_next ? 1 : -1) + count) % count;
-        s_selected = 0;
-        if (CurrentPage() == Page::States) {
-            RefreshSaveStates();
-        } else if (CurrentPage() == Page::Amiibo) {
-            RefreshAmiibos();
-        } else if (CurrentPage() == Page::Camera) {
-            RefreshCameraImages();
-        }
-        RebuildRows();
+    if (nav.tab_prev != nav.tab_next && CurrentPage() != Page::Home) {
+        const int current = s_page - static_cast<int>(Page::Display);
+        const int next = (current + (nav.tab_next ? 1 : -1) + NumSections) % NumSections;
+        EnterPage(static_cast<Page>(next + static_cast<int>(Page::Display)));
         changed = true;
     }
 
-    // ZL/ZR page through the cheat list.
-    if (CurrentPage() == Page::Cheats && (nav.page_prev || nav.page_next)) {
-        const int pages = CheatPageCount();
-        const int dir = nav.page_next ? 1 : -1;
-        s_cheat_page = (s_cheat_page + dir + pages) % pages;
-        s_selected = 0;
-        RebuildRows();
-        changed = true;
-    }
+    changed |= StepSubList(nav);
 
-    // ZL/ZR page through the save state slots.
-    if (CurrentPage() == Page::States && (nav.page_prev || nav.page_next)) {
-        const int pages = StatePageCount();
-        const int dir = nav.page_next ? 1 : -1;
-        s_state_page = (s_state_page + dir + pages) % pages;
-        s_selected = 0;
-        RebuildRows();
-        changed = true;
-    }
-
-    if (CurrentPage() == Page::Amiibo && (nav.page_prev || nav.page_next)) {
-        const int pages = AmiiboPageCount();
-        const int dir = nav.page_next ? 1 : -1;
-        s_amiibo_page = (s_amiibo_page + dir + pages) % pages;
-        s_selected = 0;
-        RebuildRows();
-        changed = true;
-    }
-
-    if (CurrentPage() == Page::Camera && (nav.page_prev || nav.page_next)) {
-        const int pages = CameraPageCount();
-        const int dir = nav.page_next ? 1 : -1;
-        s_camera_page = (s_camera_page + dir + pages) % pages;
-        s_selected = 0;
-        RebuildRows();
-        changed = true;
-    }
-
-    const int count = static_cast<int>(s_rows.size());
     if (nav.up) {
-        s_selected = (s_selected - 1 + count) % count;
+        MoveSelection(-1);
         changed = true;
     }
     if (nav.down) {
-        s_selected = (s_selected + 1) % count;
+        MoveSelection(+1);
         changed = true;
     }
 
-    const Row row = s_rows[s_selected];
+    if (s_rows.empty()) {
+        if (changed) {
+            Repaint();
+        }
+        return QuickMenuAction::None;
+    }
+
+    const Row row = s_rows[static_cast<std::size_t>(s_selected)];
     if (nav.left && !IsAction(row)) {
         Adjust(row, -1);
         changed = true;
@@ -655,8 +788,30 @@ QuickMenuAction UpdateQuickMenu(const QuickMenuNav& nav) {
         Adjust(row, 1);
         changed = true;
     }
-    // A loads, X saves, Y deletes. Save and load are queued for the emulation thread, which only
-    // reaches them once the menu lets the guest run again, so close on the way out.
+
+    if (row.item == Item::Section && nav.confirm) {
+        EnterPage(static_cast<Page>(row.index));
+        Repaint();
+        return QuickMenuAction::None;
+    }
+
+    if ((row.item == Item::SaveHere || row.item == Item::LoadHere) && nav.confirm) {
+        const auto slot = static_cast<unsigned int>(s_home_slot);
+        if (row.item == Item::SaveHere) {
+            if (RequestSaveState(slot)) {
+                CloseQuickMenu();
+                return QuickMenuAction::Close;
+            }
+        } else if (s_slot_status[slot].empty()) {
+            VideoCore::PostOverlayToast(SaveStateSlotName(slot) + " is empty");
+        } else if (RequestLoadState(slot)) {
+            CloseQuickMenu();
+            return QuickMenuAction::Close;
+        }
+        Repaint();
+        return QuickMenuAction::None;
+    }
+
     if (row.item == Item::SaveStateSlot && (nav.confirm || nav.alt || nav.alt2)) {
         const auto slot = static_cast<unsigned int>(row.index);
         const bool occupied = !s_slot_status[slot].empty();
