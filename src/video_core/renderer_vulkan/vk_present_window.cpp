@@ -4,6 +4,8 @@
 
 #include <exception>
 
+#include "common/horizon_display.h"
+#include "common/logging/log.h"
 #include "common/horizon_thread.h"
 #include "common/microprofile.h"
 #include "common/settings.h"
@@ -732,6 +734,14 @@ void PresentWindow::RecreateSwapchain(u32 width, u32 height) {
 #endif
     std::scoped_lock submit_lock{scheduler.submit_mutex};
     graphics_queue.waitIdle();
+#ifdef __SWITCH__
+    swapchain.Destroy();
+    if (!Common::Horizon::SetNativeWindowSize(emu_window.GetWindowInfo().render_surface, width,
+                                              height)) {
+        LOG_WARNING(Render_Vulkan, "Window refused to resize to {}x{}; presenting scaled",
+                    width, height);
+    }
+#endif
     swapchain.Create(width, height, surface, low_refresh_rate);
 #ifdef ENABLE_LSFG
     RecreateOverlayTargets();

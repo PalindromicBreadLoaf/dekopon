@@ -264,9 +264,11 @@ void Swapchain::Destroy() {
         device.destroySwapchainKHR(swapchain);
         swapchain = VK_NULL_HANDLE;
     }
-    for (u32 i = 0; i < image_count; i++) {
-        device.destroySemaphore(image_acquired[i]);
-        device.destroySemaphore(present_ready[i]);
+    for (vk::Semaphore& semaphore : image_acquired) {
+        device.destroySemaphore(semaphore);
+    }
+    for (vk::Semaphore& semaphore : present_ready) {
+        device.destroySemaphore(semaphore);
     }
     image_acquired.clear();
     present_ready.clear();

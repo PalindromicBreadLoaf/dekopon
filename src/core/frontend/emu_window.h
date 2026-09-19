@@ -255,6 +255,10 @@ public:
     void UpdateCurrentFramebufferLayout(unsigned width, unsigned height,
                                         bool is_portrait_mode = {});
 
+    virtual std::pair<u32, u32> GetTargetFramebufferSize() const {
+        return {framebuffer_layout.width, framebuffer_layout.height};
+    }
+
     std::unique_ptr<TextureMailbox> mailbox = nullptr;
     bool isSecondary() const {
         return is_secondary;

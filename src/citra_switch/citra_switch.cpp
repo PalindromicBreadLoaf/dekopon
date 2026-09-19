@@ -216,9 +216,10 @@ void RunGame(PadState& pad, const std::string& rom) {
         u64 prev_held = 0;
         u64 prev_input = 0;
         while (appletMainLoop()) {
-            // Blocks while the system keyboard is up. The emulation thread is waiting on it, so
-            // nothing is being drawn meanwhile.
+            // Blocks
             SwitchFrontend::PumpKeyboard();
+
+            SwitchFrontend::UpdateDisplayMode();
 
             SwitchFrontend::InputState state;
             const u64 held = PollInput(pad, state);

@@ -195,9 +195,11 @@ int GetOverlayScreenOpacity();
 void StepScreenGap(int delta);
 int GetScreenGap();
 
-// Asks the emulation thread to re-derive the framebuffer layout, for settings the layout is
-// computed from but that are not stepped through the helpers above.
-void RequestLayoutUpdate();
+bool RequestLayoutUpdate();
+
+void UpdateDisplayMode();
+
+bool DisplayFollowsDockState();
 
 // The name of the currently selected screen layout preset.
 const char* CurrentScreenLayoutName();

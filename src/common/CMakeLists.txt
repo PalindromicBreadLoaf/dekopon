@@ -143,6 +143,8 @@ endif()
 target_sources(citra_common PRIVATE
   horizon_boost.cpp
   horizon_boost.h
+  horizon_display.cpp
+  horizon_display.h
   horizon_meminfo.cpp
   horizon_meminfo.h
   horizon_thread.cpp
@@ -150,7 +152,8 @@ target_sources(citra_common PRIVATE
 )
 if (DEKOPON)
   # <switch.h> pulls in libnx headers that clash with the precompiled header set.
-  set_source_files_properties(horizon_boost.cpp horizon_meminfo.cpp horizon_thread.cpp
+  set_source_files_properties(horizon_boost.cpp horizon_display.cpp horizon_meminfo.cpp
+                              horizon_thread.cpp
                               PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
 endif()
 

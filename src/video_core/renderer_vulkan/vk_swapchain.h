@@ -23,11 +23,11 @@ public:
     /// Creates (or recreates) the swapchain with a given size.
     void Create(u32 width, u32 height, vk::SurfaceKHR surface, bool low_refresh_rate);
 
-    /// Acquires the next image in the swapchain.
     bool AcquireNextImage();
 
-    /// Presents the current image and move to the next one
     void Present();
+
+    void Destroy();
 
     vk::SurfaceKHR GetSurface() const {
         return surface;
@@ -86,9 +86,6 @@ private:
 
     /// Sets the surface properties according to device capabilities
     void SetSurfaceProperties();
-
-    /// Destroys current swapchain resources
-    void Destroy();
 
     /// Performs creation of image views and framebuffers from the swapchain images
     void SetupImages();

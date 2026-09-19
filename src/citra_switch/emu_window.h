@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include <atomic>
+#include <cstdint>
 #include <memory>
 #ifdef ENABLE_OPENGL
 #include <EGL/egl.h>
@@ -36,6 +38,10 @@ public:
     /// Reports the touch-pointer crosshair so the renderer can draw it on the bottom screen.
     CursorInfo GetCursorInfo() const override;
 
+    void RequestSize(unsigned width, unsigned height);
+
+    std::pair<u32, u32> GetTargetFramebufferSize() const override;
+
 private:
 #ifdef ENABLE_OPENGL
     bool CreateEGLContext(void* native_window);
@@ -49,6 +55,7 @@ private:
 
     int window_width{};
     int window_height{};
+    std::atomic<std::uint64_t> requested_size{};
     bool is_valid{};
     bool egl_enabled{}; // false without a host GL context (Vulkan/software)
 };

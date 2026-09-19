@@ -31,8 +31,8 @@ u32 RendererBase::GetResolutionScaleFactor() {
 
 void RendererBase::UpdateCurrentFramebufferLayout(bool is_portrait_mode) {
     const auto update_layout = [is_portrait_mode](Frontend::EmuWindow& window) {
-        const Layout::FramebufferLayout& layout = window.GetFramebufferLayout();
-        window.UpdateCurrentFramebufferLayout(layout.width, layout.height, is_portrait_mode);
+        const auto [width, height] = window.GetTargetFramebufferSize();
+        window.UpdateCurrentFramebufferLayout(width, height, is_portrait_mode);
     };
     update_layout(render_window);
     if (secondary_window != nullptr) {

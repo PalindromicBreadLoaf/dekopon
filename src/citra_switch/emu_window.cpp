@@ -15,13 +15,18 @@
 #include "citra_switch/emu_window.h"
 #include "citra_switch/input.h"
 #include "common/assert.h"
+#include "common/horizon_display.h"
 #include "common/logging/log.h"
 #include "common/settings.h"
 
 namespace {
 
-constexpr int kSwitchScreenWidth = 1280;
-constexpr int kSwitchScreenHeight = 720;
+constexpr int kSwitchScreenWidth = static_cast<int>(Common::Horizon::HandheldWidth);
+constexpr int kSwitchScreenHeight = static_cast<int>(Common::Horizon::HandheldHeight);
+
+constexpr std::uint64_t PackSize(unsigned width, unsigned height) {
+    return (std::uint64_t{width} << 32) | height;
+}
 
 #ifdef ENABLE_OPENGL
 // Switch's mesa/nouveau EGL exposes configs as EGL_OPENGL_ES2_BIT despite supporting GLES3
@@ -104,16 +109,20 @@ EmuWindow_Switch::EmuWindow_Switch(void* native_window, bool use_egl, bool is_se
     } else
 #endif
     {
-        // The Vulkan (NXVK) renderer owns the nwindow through its own swapchain
-        // and presents via the VK_NN_vi_surface WSI.
-        window_width = kSwitchScreenWidth;
-        window_height = kSwitchScreenHeight;
+        const bool docked = SwitchFrontend::DisplayFollowsDockState() && Common::Horizon::IsDocked();
+        window_width = static_cast<int>(docked ? Common::Horizon::DockedWidth
+                                               : Common::Horizon::HandheldWidth);
+        window_height = static_cast<int>(docked ? Common::Horizon::DockedHeight
+                                                : Common::Horizon::HandheldHeight);
+        Common::Horizon::SetNativeWindowSize(native_window, window_width, window_height);
         window_info.type = Frontend::WindowSystemType::Switch;
-        LOG_INFO(Frontend, "EmuWindow provided via Vulkan: {}x{}", window_width, window_height);
+        LOG_INFO(Frontend, "EmuWindow provided via Vulkan: {}x{} ({})", window_width, window_height,
+                 docked ? "docked" : "handheld");
     }
 
     window_info.render_surface = native_window;
 
+    requested_size.store(PackSize(window_width, window_height), std::memory_order_relaxed);
     UpdateCurrentFramebufferLayout(window_width, window_height);
     is_valid = true;
 }
@@ -232,6 +241,15 @@ void EmuWindow_Switch::PollEvents() {
     // main thread handles this
 }
 
+void EmuWindow_Switch::RequestSize(unsigned width, unsigned height) {
+    requested_size.store(PackSize(width, height), std::memory_order_relaxed);
+}
+
+std::pair<u32, u32> EmuWindow_Switch::GetTargetFramebufferSize() const {
+    const std::uint64_t packed = requested_size.load(std::memory_order_relaxed);
+    return {static_cast<u32>(packed >> 32), static_cast<u32>(packed & 0xFFFFFFFF)};
+}
+
 void EmuWindow_Switch::SwapBuffers() {
     if (!egl_enabled) {
         return; // the Vulkan renderer presents through its own swapchain.
@@ -279,6 +297,7 @@ void EmuWindow_Switch::PresentClear() {
 
 namespace {
 std::unique_ptr<EmuWindow_Switch> s_window;
+int s_requested_docked = -1;
 } // namespace
 
 EmuWindow_Switch* GetEmuWindow() {
@@ -286,6 +305,10 @@ EmuWindow_Switch* GetEmuWindow() {
 }
 
 namespace SwitchFrontend {
+
+bool DisplayFollowsDockState() {
+    return Settings::GetWorkingGraphicsAPI() == Settings::GraphicsAPI::Vulkan;
+}
 
 bool CreateWindow(void* native_window) {
     // Only the GLES renderer needs a host EGL context; Vulkan (NXVK) and software
@@ -301,7 +324,23 @@ bool CreateWindow(void* native_window) {
         s_window.reset();
         return false;
     }
+    s_requested_docked = -1;
     return true;
+}
+
+void UpdateDisplayMode() {
+    if (!s_window || !DisplayFollowsDockState()) {
+        return;
+    }
+    const int docked = Common::Horizon::IsDocked() ? 1 : 0;
+    if (docked == s_requested_docked) {
+        return;
+    }
+    s_window->RequestSize(docked ? Common::Horizon::DockedWidth : Common::Horizon::HandheldWidth,
+                          docked ? Common::Horizon::DockedHeight : Common::Horizon::HandheldHeight);
+    if (RequestLayoutUpdate()) {
+        s_requested_docked = docked;
+    }
 }
 
 void ClearFrame() {
