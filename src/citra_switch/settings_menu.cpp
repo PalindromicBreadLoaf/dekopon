@@ -324,7 +324,7 @@ HW::UniqueData::SecureDataLoadStatus LoadUniqueData(UniqueDataFile file) {
 namespace {
 
 std::vector<SettingsRow> RowsFor(const std::vector<const SettingEntry*>& entries,
-                                 bool with_headings) {
+                                 bool with_headings, bool per_game = false) {
     std::vector<SettingsRow> rows;
     rows.reserve(entries.size() + 8);
     const char* open_heading = nullptr;
@@ -345,6 +345,10 @@ std::vector<SettingsRow> RowsFor(const std::vector<const SettingEntry*>& entries
         row.boolean = entry->boolean;
         row.description = entry->description != nullptr ? entry->description : "";
         row.needs_restart = (entry->flags & EntryFlag::Restart) != 0;
+        if (per_game) {
+            row.using_global = entry->using_global;
+            row.set_global = entry->set_global;
+        }
         rows.push_back(std::move(row));
     }
     return rows;
@@ -363,6 +367,21 @@ std::vector<SettingsRow> BuildQuickRows(QuickSection section) {
 std::vector<SettingsRow> BuildSearchRows(const std::string& query) {
     const std::vector<const SettingEntry*> matches = SearchEntries(query);
     std::vector<SettingsRow> rows = RowsFor(matches, false);
+    for (std::size_t i = 0; i < rows.size(); ++i) {
+        const Category category = matches[i]->category;
+        const char* page = category == Category::Count ? "Quick Menu" : CategoryName(category);
+        rows[i].label = std::string{page} + " > " + rows[i].label;
+    }
+    return rows;
+}
+
+std::vector<SettingsRow> BuildGameCategoryRows(Category category) {
+    return RowsFor(OverridableEntriesIn(category), true, true);
+}
+
+std::vector<SettingsRow> BuildGameSearchRows(const std::string& query) {
+    const std::vector<const SettingEntry*> matches = SearchOverridableEntries(query);
+    std::vector<SettingsRow> rows = RowsFor(matches, false, true);
     for (std::size_t i = 0; i < rows.size(); ++i) {
         const Category category = matches[i]->category;
         const char* page = category == Category::Count ? "Quick Menu" : CategoryName(category);

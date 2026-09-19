@@ -946,7 +946,7 @@ int InstallRows() {
 // Modal panel listing what is installed alongside one library entry.
 void DrawTitleDetails(Canvas& c, const GameEntry& game, const TitleDetails& details) {
     const int w = std::min(660, ContentW() - 48);
-    constexpr int h = 390;
+    constexpr int h = 420;
     const int x = kContentX + (ContentW() - w) / 2;
     const int y = kContentTop + (ContentBottom() - kContentTop - h) / 2;
     c.FillRect(0, 0, g_screen_w, g_screen_h, MakeColor(0x10, 0x11, 0x13, 0xC0));
@@ -990,6 +990,9 @@ void DrawTitleDetails(Canvas& c, const GameEntry& game, const TitleDetails& deta
                               (details.dlc_contents == 1 ? " content" : " contents")
                         : std::string{"Not installed"},
         details.has_dlc ? kColAccent : kColTextDim);
+    const bool customised = HasPerGameConfig(game.program_id);
+    row("Settings", customised ? "Customised for this game" : "Global",
+        customised ? kColAccent : kColTextDim);
     const bool inserted = game.insertable && GetInsertedCartridge() == game.path;
     if (game.insertable) {
         row("Cartridge", inserted ? "Inserted" : "Not inserted",
@@ -1006,6 +1009,7 @@ void DrawTitleDetails(Canvas& c, const GameEntry& game, const TitleDetails& deta
     }
     if (game.program_id != 0) {
         hx += DrawHint(c, hx, hy, "Y", "Manage Saves") + 22;
+        hx += DrawHint(c, hx, hy, "A", "Game Settings") + 22;
     }
     DrawHint(c, hx, hy, "B", "Close");
 }
@@ -1340,9 +1344,13 @@ public:
                 }
                 if ((down & HidNpadButton_Y) && game.program_id != 0) {
                     OpenSaves();
+                } else if ((down & HidNpadButton_A) && game.program_id != 0) {
+                    OpenPerGameSettings();
                 } else if (down & (HidNpadButton_A | HidNpadButton_B | HidNpadButton_Plus)) {
                     details_open = false;
                 }
+            } else if (PerGameOpen()) {
+                HandleSettings(down, nav, dpad_nav);
             } else if (focus == Focus::Rail) {
                 HandleRail(down, nav);
             } else if (tab == Tab::Library) {
@@ -1363,7 +1371,7 @@ public:
             if (!install_active && !update_download_active && !update_installed &&
                 !UpdateModalOpen() && !info_card && !details_open && !saves_open &&
                 !layout_picker_open && !remap_open && !preset_picker_open && !country_picker_open &&
-                !confirm) {
+                !confirm && !PerGameOpen()) {
                 HandleTouch();
             }
             if (pending_launch) {
@@ -1425,6 +1433,13 @@ private:
     std::string settings_search_query;
     int settings_search_sel = 0;
     int settings_search_scroll = 0;
+
+    std::uint64_t per_game_id = 0;
+    std::string per_game_title;
+    bool per_game_dirty = false;
+    Category per_game_return_page{Category::General};
+    std::array<int, NumCategories> per_game_sel{};
+    std::array<int, NumCategories> per_game_scroll{};
 
     Repeater repeater;
     Framebuffer fb{};
@@ -1584,11 +1599,25 @@ private:
         }
     }
 
+    bool PerGameOpen() const {
+        return per_game_id != 0;
+    }
+
+    static Category FirstOverridablePage() {
+        for (int i = 0; i < NumCategories; ++i) {
+            const auto page = static_cast<Category>(i);
+            if (CategoryHasOverridables(page)) {
+                return page;
+            }
+        }
+        return Category::General;
+    }
+
     void SetSettingsPage(Category page) {
         settings_search_open = false;
         RefreshUniqueDataStatus();
         settings_page = page;
-        settings_rows = BuildCategoryRows(page);
+        settings_rows = PerGameOpen() ? BuildGameCategoryRows(page) : BuildCategoryRows(page);
         SettingsSel() = SettleSettingsSelection(SettingsSel(), +1);
         ScrollSettingsIntoView();
     }
@@ -1600,7 +1629,8 @@ private:
             return;
         }
         settings_search_query = *text;
-        settings_rows = BuildSearchRows(settings_search_query);
+        settings_rows = PerGameOpen() ? BuildGameSearchRows(settings_search_query)
+                                      : BuildSearchRows(settings_search_query);
         settings_search_open = true;
         settings_search_sel = 0;
         settings_search_scroll = 0;
@@ -1615,13 +1645,19 @@ private:
     }
 
     int& SettingsSel() {
-        return settings_search_open ? settings_search_sel
-                                    : settings_sel[static_cast<std::size_t>(settings_page)];
+        if (settings_search_open) {
+            return settings_search_sel;
+        }
+        auto& cursors = PerGameOpen() ? per_game_sel : settings_sel;
+        return cursors[static_cast<std::size_t>(settings_page)];
     }
 
     int& SettingsScroll() {
-        return settings_search_open ? settings_search_scroll
-                                    : settings_scroll[static_cast<std::size_t>(settings_page)];
+        if (settings_search_open) {
+            return settings_search_scroll;
+        }
+        auto& scrolls = PerGameOpen() ? per_game_scroll : settings_scroll;
+        return scrolls[static_cast<std::size_t>(settings_page)];
     }
 
     int SettleSettingsSelection(int index, int dir) const {
@@ -1656,6 +1692,9 @@ private:
     }
 
     void Flush() {
+        if (PerGameOpen()) {
+            ClosePerGameSettings();
+        }
         FlushSettings();
         FlushPaths();
     }
@@ -2026,8 +2065,15 @@ private:
     }
 
     void StepSettingsPage(int dir) {
-        SetSettingsPage(static_cast<Category>(
-            (static_cast<int>(settings_page) + dir + NumCategories) % NumCategories));
+        int index = static_cast<int>(settings_page);
+        for (int i = 0; i < NumCategories; ++i) {
+            index = (index + dir + NumCategories) % NumCategories;
+            const auto page = static_cast<Category>(index);
+            if (!PerGameOpen() || CategoryHasOverridables(page)) {
+                SetSettingsPage(page);
+                return;
+            }
+        }
     }
 
     void OpenSettingsModal(SettingsModal modal) {
@@ -2230,7 +2276,11 @@ private:
         }
         if (settings_rows.empty()) {
             if (down & HidNpadButton_B) {
-                EnterRail();
+                if (PerGameOpen()) {
+                    ClosePerGameSettings();
+                } else {
+                    EnterRail();
+                }
             }
             return false;
         }
@@ -2248,6 +2298,8 @@ private:
         const auto back = [this] {
             if (settings_search_open) {
                 CloseSettingsSearch();
+            } else if (PerGameOpen()) {
+                ClosePerGameSettings();
             } else {
                 EnterRail();
             }
@@ -2264,18 +2316,34 @@ private:
             return false;
         }
 
+        if (PerGameOpen() && (down & HidNpadButton_X) && row.set_global) {
+            row.set_global(!row.using_global());
+            per_game_dirty = true;
+            return false;
+        }
+
+        const auto edit = [this, &row](int dir) {
+            if (PerGameOpen()) {
+                if (row.set_global && row.using_global()) {
+                    row.set_global(false);
+                }
+                row.step(dir);
+                per_game_dirty = true;
+                return;
+            }
+            row.step(dir);
+            settings_dirty = true;
+        };
+
         // Settings::values is edited live. FlushSettings() only batches the config.ini write.
         if (dpad_nav & DirLeft) {
-            row.step(-1);
-            settings_dirty = true;
+            edit(-1);
         }
         if (dpad_nav & DirRight) {
-            row.step(+1);
-            settings_dirty = true;
+            edit(+1);
         }
         if (down & HidNpadButton_A) {
-            row.step(row.boolean && row.boolean() ? -1 : +1);
-            settings_dirty = true;
+            edit(row.boolean && row.boolean() ? -1 : +1);
         }
         if (down & HidNpadButton_B) {
             back();
@@ -2617,6 +2685,46 @@ private:
         }
         confirm = ConfirmPrompt{"Update failed", std::move(lines),
                                 "The installed NRO was not changed.", "Close", [] {}};
+    }
+
+    void OpenPerGameSettings() {
+        if (filtered.empty()) {
+            return;
+        }
+        const GameEntry& game = games[filtered[selected]];
+        if (game.program_id == 0) {
+            ShowNotice("This title has no title ID to attach settings to", true);
+            return;
+        }
+        FlushSettings();
+        details_open = false;
+        focus = Focus::Content;
+        per_game_id = game.program_id;
+        per_game_title = game.title;
+        per_game_dirty = false;
+        per_game_sel.fill(0);
+        per_game_scroll.fill(0);
+        per_game_return_page = settings_page;
+        ApplyPerGameConfig(per_game_id);
+        SetSettingsPage(CategoryHasOverridables(settings_page) ? settings_page
+                                                               : FirstOverridablePage());
+    }
+
+    void ClosePerGameSettings() {
+        if (per_game_dirty) {
+            SavePerGameConfig();
+            ShowNotice(CountPerGameOverrides() == 0
+                           ? "Cleared the settings for " + per_game_title
+                           : "Saved settings for " + per_game_title,
+                       false);
+        }
+        ClearPerGameConfig();
+        per_game_id = 0;
+        per_game_title.clear();
+        per_game_dirty = false;
+        settings_search_open = false;
+        settings_rows.clear();
+        settings_page = per_game_return_page;
     }
 
     void OpenRemap() {
@@ -3371,6 +3479,13 @@ private:
     void Draw() {
         Canvas& c = canvas;
         c.Clear(kColBg);
+        DrawHintBar(c);
+        if (PerGameOpen()) {
+            DrawRail(c, Tab::Settings, Tab::Settings, false);
+            DrawSettingsPage(c);
+            DrawNotice(c);
+            return;
+        }
         DrawRail(c, tab, rail_sel, focus == Focus::Rail);
         if (tab == Tab::Library) {
             DrawLibrary(c);
@@ -3384,7 +3499,6 @@ private:
             DrawArticPage(c);
         }
         DrawNotice(c);
-        DrawHintBar(c);
         if (details_open && !filtered.empty()) {
             DrawTitleDetails(c, games[filtered[selected]], details);
         }
@@ -3765,7 +3879,7 @@ private:
                         g_font.Truncate(name, 18, w - kTabPadX * 2), 18, kColOnAccent);
             return;
         }
-        if (CompactTabStrip()) {
+        if (CompactTabStrip() || PerGameOpen()) {
             const char* name = CategoryName(settings_page);
             const int baseline = CenterBaseline(kTabStripTop, kTabStripH, 18);
             const int w = g_font.Measure(name, 18) + kTabPadX * 2;
@@ -3791,7 +3905,8 @@ private:
     }
 
     void DrawSettingsPage(Canvas& c) {
-        DrawHeader(c, "");
+        DrawHeader(c, PerGameOpen() ? g_font.Truncate(per_game_title, 20, ContentW() / 2)
+                                    : std::string{});
         DrawSettingsTabs(c);
 
         const bool content_focus = focus == Focus::Content;
@@ -3820,12 +3935,20 @@ private:
                                 content_focus ? kColAccent : kColBadge);
             }
             g_font.Draw(c, x + 20, CenterBaseline(y, kRowH, 22), row.label, 22, kColText);
+            const bool overridden = row.using_global && !row.using_global();
+            const int value_inset = PerGameOpen() ? 40 : 24;
             const std::string value = row.value();
-            const int max_value_w = w - 44 - g_font.Measure(row.label, 22);
+            const int max_value_w = w - 20 - value_inset - g_font.Measure(row.label, 22);
             const std::string shown = g_font.Truncate(value, 22, std::max(60, max_value_w));
             const int vw = g_font.Measure(shown, 22);
-            g_font.Draw(c, x + w - 24 - vw, CenterBaseline(y, kRowH, 22), shown, 22,
-                        on && content_focus ? kColAccent : kColTextDim);
+            const u32 value_color = on && content_focus ? kColAccent
+                                    : overridden        ? kColText
+                                                        : kColTextDim;
+            g_font.Draw(c, x + w - value_inset - vw, CenterBaseline(y, kRowH, 22), shown, 22,
+                        value_color);
+            if (overridden) {
+                c.FillRoundRect(x + w - 26, y + kRowH / 2 - 5, 10, 10, 5, kColAccent);
+            }
         }
         DrawListScrollbar(c, g_screen_w - 20, kSettingsTop, SettingsVisibleRows(),
                           kSettingsRowStride, count, scroll);
@@ -3835,10 +3958,15 @@ private:
         const std::string description = has_sel ? settings_rows[sel].description : std::string{};
         g_font.Draw(c, x + 20, footer_y + 16, g_font.Truncate(description, 18, w - 40), 18,
                     kColText);
-        const std::string note =
+        std::string note =
             has_sel && settings_rows[sel].needs_restart
                 ? std::string{"Takes effect the next time you launch a game."}
                 : std::string{"Graphics backend: "} + ActiveGraphicsBackendName();
+        if (PerGameOpen()) {
+            const bool overridden =
+                has_sel && settings_rows[sel].using_global && !settings_rows[sel].using_global();
+            note = overridden ? "Set for this game only." : "Following the global setting.";
+        }
         g_font.Draw(c, x + 20, footer_y + 42, note, 18, kColTextDim);
 
         if (focus == Focus::Rail) {
@@ -3854,11 +3982,16 @@ private:
             } else {
                 hx += DrawHint(c, hx, hy, "<>", "Change") + 22;
             }
+            if (PerGameOpen() && has_sel && settings_rows[sel].set_global) {
+                hx += DrawHint(c, hx, hy, "X",
+                               settings_rows[sel].using_global() ? "Override" : "Use Global") + 22;
+            }
             hx += DrawHint(c, hx, hy, "Y", "Search") + 22;
             if (!settings_search_open) {
                 hx += DrawHint(c, hx, hy, "L R", "Page") + 22;
             }
-            hx += DrawHint(c, hx, hy, "B", settings_search_open ? "Back" : "Menu") + 22;
+            hx += DrawHint(c, hx, hy, "B",
+                           settings_search_open ? "Back" : PerGameOpen() ? "Done" : "Menu") + 22;
             DrawHint(c, hx, hy, "+ -", "Exit");
         }
     }

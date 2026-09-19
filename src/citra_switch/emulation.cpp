@@ -351,6 +351,12 @@ bool BootRom(const std::string& rom_arg) {
         system.RegisterAppLoaderEarly(app_loader);
     }
 
+    u64 settings_program_id = 0;
+    if (app_loader) {
+        app_loader->ReadProgramId(settings_program_id);
+    }
+    ApplyPerGameConfig(settings_program_id);
+
     system.ApplySettings();
     Settings::LogSettings();
 
@@ -658,6 +664,7 @@ void StopRom() {
         system.Shutdown();
     }
     system.EjectCartridge();
+    ClearPerGameConfig();
 }
 
 } // namespace SwitchFrontend

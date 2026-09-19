@@ -9,6 +9,8 @@
 #include <sstream>
 #include <string>
 #include <type_traits>
+#include <vector>
+#include <fmt/format.h>
 #include <INIReader.h>
 #include "common/file_util.h"
 #include "common/logging/backend.h"
@@ -94,6 +96,13 @@ void ApplyCameraSettings() {
 
 // INIReader has no "is this key present" call for some reason.
 constexpr const char* kAbsentValue = "\x01" "dekopon-absent";
+
+std::uint64_t s_per_game_id = 0;
+
+std::string PerGameConfigPath(std::uint64_t program_id) {
+    return fmt::format("{}custom/{:016X}.ini",
+                       FileUtil::GetUserPath(FileUtil::UserPath::ConfigDir), program_id);
+}
 
 // Reads/Writes the SD-card config file
 class Config {
@@ -247,7 +256,7 @@ private:
             }
             out += entry.id;
             out += " = ";
-            out += entry.save();
+            out += entry.save_global ? entry.save_global() : entry.save();
             out += '\n';
         }
 
@@ -543,6 +552,104 @@ void SaveConfig() {
     if (s_config) {
         s_config->Save();
     }
+    SavePerGameConfig();
+}
+
+void ApplyPerGameConfig(std::uint64_t program_id) {
+    ClearPerGameConfig();
+    if (program_id == 0) {
+        return;
+    }
+    s_per_game_id = program_id;
+
+    std::string ini_buffer;
+    FileUtil::ReadFileToString(true, PerGameConfigPath(program_id), ini_buffer);
+    if (ini_buffer.empty()) {
+        return;
+    }
+    INIReader ini{ini_buffer.c_str(), ini_buffer.size()};
+    if (ini.ParseError() < 0) {
+        LOG_WARNING(Config, "Failed to parse {}",
+                    PerGameConfigPath(program_id));
+        return;
+    }
+
+    int applied = 0;
+    for (const SwitchFrontend::SettingEntry& entry : SwitchFrontend::Registry()) {
+        if (!entry.IsOverridable()) {
+            continue;
+        }
+        const std::string raw = ini.Get(entry.group, entry.id, kAbsentValue);
+        if (raw == kAbsentValue) {
+            continue;
+        }
+        entry.set_global(false);
+        entry.load(raw);
+        ++applied;
+    }
+    LOG_INFO(Config, "Applied {} setting override(s) for title {:016X}", applied, program_id);
+}
+
+void SavePerGameConfig() {
+    if (s_per_game_id == 0) {
+        return;
+    }
+    const std::string path = PerGameConfigPath(s_per_game_id);
+
+    std::vector<std::string> order;
+    std::map<std::string, std::string> bodies;
+    int overrides = 0;
+    for (const SwitchFrontend::SettingEntry& entry : SwitchFrontend::Registry()) {
+        if (!entry.IsOverridden()) {
+            continue;
+        }
+        if (bodies.find(entry.group) == bodies.end()) {
+            order.emplace_back(entry.group);
+        }
+        bodies[entry.group] += std::string{entry.id} + " = " + entry.save() + '\n';
+        ++overrides;
+    }
+
+    if (order.empty()) {
+        if (FileUtil::Exists(path)) {
+            FileUtil::Delete(path);
+            LOG_INFO(Config, "Removed the settings file for title {:016X}", s_per_game_id);
+        }
+        return;
+    }
+
+    std::ostringstream ss;
+    ss << "# Settings this title overrides. Everything else follows config.ini.\n";
+    for (const std::string& name : order) {
+        ss << '\n' << '[' << name << "]\n" << bodies[name];
+    }
+    FileUtil::CreateFullPath(path);
+    FileUtil::WriteStringToFile(true, path, ss.str());
+    LOG_INFO(Config, "Saved {} override(s) for title {:016X}", overrides, s_per_game_id);
+}
+
+void ClearPerGameConfig() {
+    SwitchFrontend::RestoreGlobalSettings();
+    s_per_game_id = 0;
+}
+
+std::uint64_t GetPerGameConfigId() {
+    return s_per_game_id;
+}
+
+bool HasPerGameConfig(std::uint64_t program_id) {
+    return program_id != 0 && FileUtil::Exists(PerGameConfigPath(program_id));
+}
+
+int CountPerGameOverrides() {
+    if (s_per_game_id == 0) {
+        return 0;
+    }
+    int count = 0;
+    for (const SwitchFrontend::SettingEntry& entry : SwitchFrontend::Registry()) {
+        count += entry.IsOverridden() ? 1 : 0;
+    }
+    return count;
 }
 
 const char* SettingsPresetName(SettingsPreset preset) {

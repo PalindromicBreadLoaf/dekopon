@@ -113,8 +113,19 @@ const std::string& GetActiveUserDir();
 std::string GetDefaultUserDir();
 std::string GetDefaultRomsDir(const std::string& user_dir);
 
-// Serialises the current Settings::values back to config.ini.
 void SaveConfig();
+
+void ApplyPerGameConfig(std::uint64_t program_id);
+
+void SavePerGameConfig();
+
+void ClearPerGameConfig();
+
+std::uint64_t GetPerGameConfigId();
+
+bool HasPerGameConfig(std::uint64_t program_id);
+
+int CountPerGameOverrides();
 
 // The bundles the reset row can put the settings into.
 enum class SettingsPreset {

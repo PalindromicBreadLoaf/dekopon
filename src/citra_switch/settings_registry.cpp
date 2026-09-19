@@ -172,6 +172,19 @@ void Persist(SettingEntry& entry, S& setting) {
     entry.load = [&setting](std::string_view text) {
         setting = FromText(text, static_cast<T>(setting.GetValue()));
     };
+    if constexpr (requires { setting.UsingGlobal(); }) {
+        entry.using_global = [&setting] { return setting.UsingGlobal(); };
+        entry.save_global = [&setting] { return ToText(setting.GetValue(true)); };
+        entry.set_global = [&setting](bool global) {
+            if (!global && setting.UsingGlobal()) {
+                const T seed = static_cast<T>(setting.GetValue(true));
+                setting.SetGlobal(false);
+                setting = seed;
+                return;
+            }
+            setting.SetGlobal(global);
+        };
+    }
 }
 
 // Same, for a value the frontend keeps outside Settings::values.
@@ -1381,6 +1394,43 @@ std::vector<const SettingEntry*> SearchEntries(std::string_view query) {
         out.push_back(entry);
     }
     return out;
+}
+
+std::vector<const SettingEntry*> OverridableEntriesIn(Category category) {
+    std::vector<const SettingEntry*> out;
+    for (const SettingEntry* entry : EntriesIn(category)) {
+        if (entry->IsOverridable()) {
+            out.push_back(entry);
+        }
+    }
+    return out;
+}
+
+std::vector<const SettingEntry*> SearchOverridableEntries(std::string_view query) {
+    std::vector<const SettingEntry*> out;
+    for (const SettingEntry* entry : SearchEntries(query)) {
+        if (entry->IsOverridable()) {
+            out.push_back(entry);
+        }
+    }
+    return out;
+}
+
+bool CategoryHasOverridables(Category category) {
+    for (const SettingEntry& entry : Registry()) {
+        if (entry.category == category && entry.IsOverridable()) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void RestoreGlobalSettings() {
+    for (const SettingEntry& entry : Registry()) {
+        if (entry.set_global) {
+            entry.set_global(true);
+        }
+    }
 }
 
 const SettingEntry* FindEntry(std::string_view id) {

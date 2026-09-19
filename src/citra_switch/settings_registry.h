@@ -105,8 +105,18 @@ struct SettingEntry {
     std::function<std::string()> default_text;
     std::function<void(std::string_view)> load;
 
+    std::function<bool()> using_global;
+    std::function<void(bool)> set_global;
+    std::function<std::string()> save_global;
+
     bool IsPersisted() const {
         return static_cast<bool>(save);
+    }
+    bool IsOverridable() const {
+        return static_cast<bool>(set_global) && IsPersisted();
+    }
+    bool IsOverridden() const {
+        return IsOverridable() && !using_global();
     }
     bool IsShownInQuickMenu() const {
         return !quick_visible || quick_visible();
@@ -120,6 +130,14 @@ std::vector<const SettingEntry*> EntriesIn(Category category);
 std::vector<const SettingEntry*> EntriesInQuick(QuickSection section);
 
 std::vector<const SettingEntry*> SearchEntries(std::string_view query);
+
+std::vector<const SettingEntry*> OverridableEntriesIn(Category category);
+
+std::vector<const SettingEntry*> SearchOverridableEntries(std::string_view query);
+
+bool CategoryHasOverridables(Category category);
+
+void RestoreGlobalSettings();
 
 const SettingEntry* FindEntry(std::string_view id);
 

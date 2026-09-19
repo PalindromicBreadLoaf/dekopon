@@ -21,6 +21,9 @@ struct SettingsRow {
     std::string description;
     bool is_header{};
     bool needs_restart{};
+    // Bound only in the per-game editor, for rows the core can hold an override for.
+    std::function<bool()> using_global;
+    std::function<void(bool)> set_global;
 };
 
 std::vector<SettingsRow> BuildCategoryRows(Category category);
@@ -28,6 +31,11 @@ std::vector<SettingsRow> BuildCategoryRows(Category category);
 std::vector<SettingsRow> BuildQuickRows(QuickSection section);
 
 std::vector<SettingsRow> BuildSearchRows(const std::string& query);
+
+// The same pages restricted to what a single title can override, with the override state bound.
+std::vector<SettingsRow> BuildGameCategoryRows(Category category);
+
+std::vector<SettingsRow> BuildGameSearchRows(const std::string& query);
 
 // The log filter string, and applying a new one to the running logger.
 std::string GetLogFilter();
