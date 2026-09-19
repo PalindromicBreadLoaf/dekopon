@@ -8,7 +8,9 @@
 
 <b>Dekopon</b> is an open-source 3DS emulator for the Nintendo Switch based on Azahar.
 
-Many many thanks to the Azahar team for creating such an amazing project in the first place.
+The Azahar base currently in use is Azahar 2126.1.1
+
+Many many thanks to the Azahar team for creating such an amazing project in the first place!
 
 <p align="center">
   <a href="https://ko-fi.com/palindromicbreadloaf">Support Dekopon development on Ko-fi</a>
@@ -17,7 +19,7 @@ Many many thanks to the Azahar team for creating such an amazing project in the 
 
 # Project status
 
-Currently, the project boots and runs games at mostly full speed (see the compatibility list for details: https://cryptpad.fr/sheet/#/2/sheet/view/PJKtoq0haezswSwH8qgEJkp7NWO57qNNL7cq04JsJAM/)\
+Currently, the project boots and runs games at mostly full speed (see the (outdated) compatibility list for details: https://cryptpad.fr/sheet/#/2/sheet/view/PJKtoq0haezswSwH8qgEJkp7NWO57qNNL7cq04JsJAM/)\
 \
 Other features include:
 - Full gyro support
@@ -35,12 +37,15 @@ Other features include:
 - Full 3D support via Nintendo Labo VR Kit/Virtual Boy for Nintendo Switch
 - (Virtual) Cartridge insertion support
 - Resolution Upscaling
-- Amiibo support via .bin amiibo images placed in `amiibo`
+- Native 1080p output when docked, switching live as the console is docked and undocked
+- Amiibo (both actual and .bin amiibo images placed in `amiibo`)
 - Camera support via static images placed in `camera`
 - Loading ROMs via USB Mass Storage
 - In-built auto-updater
 - Save management
 - Save states
+- Per-game options
+- Frame generation via LSFG
 - And other things I'm probably forgetting.
 
 Features currently in the pipeline are:
@@ -140,6 +145,42 @@ Dekopon can update itself. This is found under **Settings > General**.
   has changed.
 
 Obviously, this needs a working internet connection.
+
+# LSFG
+
+2/3/4x frame generation is supported via LSFG. You must supply your own Lossless.dll downloaded from
+[Steam](https://store.steampowered.com/app/993090/Lossless_Scaling/) to use this feature. Lossless.dll
+should be placed in `sdmc:/switch/dekopon/lsfg/Lossless.dll`. The settings UI (Under Settings > Graphics >
+Frame Generation) will tell you if the file was detected. This has a very large GPU performance impact 
+(much more than increase render resolution), so expect to have to overclock the GPU to get good results
+out of it. I found that 2x is possible in handheld at 460MHz with 25% flow scale. Mess around with the 
+settings to see what best suits you and your perferances.
+
+To enable frame generation, set the `Frame Generation` option to `On:`. This will look weird in the menu,
+as it will say `On: Off`, but that's because the menu is already 60fps, and thus doesn`t need framegen running.
+The second variable is just the status of it currently. In-game, this will change to active for sub-60fps games.
+
+Note on first boot there will be a significant delay when starting the game as the frame generation shaders need
+to be compiled first. This only needs to happen once, then games will boot at the same speed as before again.
+
+There is also the option to increase the multiplier for those that have overclocked their display beyond 60Hz. 
+Note that this is untested (I only have an Erista model...), but it in theory should work? This also greatly 
+increases GPU usage, so a much higher overclock will be needed.
+
+# Amiibo
+
+You can use your actual amiibo figures now in games! Just go to the `Amiibo` tab in the quick menu, then choose
+to scan a real amiibo figure. After this, amiibo scanning will work as it does normally.
+
+Note that this can corrupt your amiibo, so be safe and have backups. I've never experienced corruption, but it is
+possible.
+
+There is one quirk, however, when saving a new game to the amiibo, you will get an error stating to open the menu
+to delete the previously saved data (only one game can exist on an amiibo at a time). This requires you to continue
+to hold the amiibo over the nfc touchpoint while navigating the menu to delete the previously stored information so
+that the game can save the new information to it. It's super janky, I know, but it's the best way I could find, and 
+it only happens once per new amiibo registered to a game. It's easier to just fully wipe the amiibo beforehand if you
+wish to do this. 
 
 # Build instructions
 
