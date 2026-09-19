@@ -112,6 +112,8 @@ void VisitPersistedSettings(Visitor&& visit) {
     visit("Renderer", v.use_frame_generation);
     visit("Renderer", v.frame_generation_performance_mode);
     visit("Renderer", v.frame_generation_flow_scale);
+    visit("Renderer", v.frame_generation_multiplier);
+    visit("Renderer", v.frame_generation_high_refresh);
     visit("Renderer", v.async_gpu_emulation);
     visit("Renderer", v.strict_gpu_sync);
     visit("Renderer", v.async_presentation);

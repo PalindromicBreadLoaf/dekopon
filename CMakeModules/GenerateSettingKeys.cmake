@@ -52,6 +52,8 @@ foreach(KEY IN ITEMS
     "use_frame_generation"
     "frame_generation_performance_mode"
     "frame_generation_flow_scale"
+    "frame_generation_multiplier"
+    "frame_generation_high_refresh"
     "use_display_refresh_rate_detection"
     "use_shader_jit"
     "show_fps"

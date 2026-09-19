@@ -65,6 +65,11 @@ frame_generation_performance_mode =
 # Optical-flow resolution as a percentage of the interpolated image, 12-100 (25, default).
 # Chain cost grows with the square of this.
 frame_generation_flow_scale =
+# Upper bound on frames presented per real frame, 2-4 (2, default).
+frame_generation_multiplier =
+# Let frame generation present more than 60 frames a second (0, default). Only to be used with a
+# display running above 60 Hz.
+frame_generation_high_refresh =
 # Skip drawing the right eye of the top screen (0, default).
 # Greatly improves performance in some games, but can cause flickering in others.
 # Can also be toggled live from the quick menu.

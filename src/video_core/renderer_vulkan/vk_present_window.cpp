@@ -126,7 +126,7 @@ PresentWindow::PresentWindow(Frontend::EmuWindow& emu_window_, const Instance& i
     command_pool = device.createCommandPool(pool_info);
 
 #ifdef ENABLE_LSFG
-    constexpr u32 buffers_per_frame = 2;
+    constexpr u32 buffers_per_frame = 1 + kMaxGeneratedFrames;
 #else
     constexpr u32 buffers_per_frame = 1;
 #endif
@@ -143,7 +143,9 @@ PresentWindow::PresentWindow(Frontend::EmuWindow& emu_window_, const Instance& i
         Frame& frame = swap_chain[i];
         frame.cmdbuf = command_buffers[i * buffers_per_frame];
 #ifdef ENABLE_LSFG
-        frame.generated_cmdbuf = command_buffers[i * buffers_per_frame + 1];
+        for (u32 j = 0; j < kMaxGeneratedFrames; j++) {
+            frame.generated_cmdbufs[j] = command_buffers[i * buffers_per_frame + 1 + j];
+        }
 #endif
         frame.render_ready = device.createSemaphore({});
         frame.present_done = device.createFence({.flags = vk::FenceCreateFlagBits::eSignaled});
@@ -297,17 +299,18 @@ Frame* PresentWindow::GetRenderFrame() {
     return frame;
 }
 
-bool PresentWindow::ShouldUsePresentThread() const {
-#ifdef ENABLE_LSFG
-    if (Settings::values.use_frame_generation.GetValue()) {
-        return false;
-    }
-#endif
-    return async_presentation;
-}
-
 void PresentWindow::Present(Frame* frame) {
-    const bool async = ShouldUsePresentThread();
+    bool generating = false;
+#ifdef ENABLE_LSFG
+    frame->frame_gen = VideoCore::UpdateFrameGenerationGate();
+    if (frame->frame_gen.state == VideoCore::FrameGenerationState::Active &&
+        lsfg_unavailable.load(std::memory_order_relaxed)) {
+        frame->frame_gen = {VideoCore::FrameGenerationState::Unavailable, 0};
+    }
+    generating = frame->frame_gen.state == VideoCore::FrameGenerationState::Active;
+#endif
+
+    const bool async = async_presentation && !generating;
     if (async != use_present_thread) {
         WaitPresent();
         use_present_thread = async;
@@ -396,21 +399,53 @@ void PresentWindow::ResetFrameGeneration() {
     lsfg_bridge.reset();
 }
 
-void PresentWindow::UpdateFrameGeneration(u32 width, u32 height) {
-    if (!Settings::values.use_frame_generation.GetValue()) {
+void PresentWindow::UpdateFrameGeneration(Frame* frame) {
+    using VideoCore::FrameGenerationState;
+
+    if (frame->frame_gen.state == FrameGenerationState::Off) {
         ResetFrameGeneration();
         lsfg_attempted = false;
+        lsfg_unavailable.store(false, std::memory_order_relaxed);
+        VideoCore::PublishFrameGenerationDecision(frame->frame_gen);
         return;
     }
 
-    if (lsfg_attempted && lsfg_width == width && lsfg_height == height) {
+    const LsfgConfig config{
+        .width = frame->width,
+        .height = frame->height,
+        .multiplier = frame->frame_gen.multiplier,
+        .flow_scale = Settings::values.frame_generation_flow_scale.GetValue(),
+        .performance_mode = Settings::values.frame_generation_performance_mode.GetValue(),
+    };
+
+    if (frame->frame_gen.state == FrameGenerationState::Unavailable) {
+        if (lsfg_config != config) {
+            lsfg_attempted = false;
+            lsfg_unavailable.store(false, std::memory_order_relaxed);
+        }
+        VideoCore::PublishFrameGenerationDecision(frame->frame_gen);
+        return;
+    }
+
+    if (frame->frame_gen.state != FrameGenerationState::Active) {
+        if (lsfg_bridge) {
+            lsfg_bridge->ResetHistory();
+        }
+        VideoCore::PublishFrameGenerationDecision(frame->frame_gen);
+        return;
+    }
+
+    if (lsfg_attempted && lsfg_config == config) {
+        if (!lsfg_bridge) {
+            frame->frame_gen = {FrameGenerationState::Unavailable, 0};
+        }
+        VideoCore::PublishFrameGenerationDecision(frame->frame_gen);
         return;
     }
 
     ResetFrameGeneration();
     lsfg_attempted = true;
-    lsfg_width = width;
-    lsfg_height = height;
+    lsfg_config = config;
 
     const vk::Format format = swapchain.GetSurfaceFormat().format;
     if (format != vk::Format::eR8G8B8A8Unorm) {
@@ -425,26 +460,38 @@ void PresentWindow::UpdateFrameGeneration(u32 width, u32 height) {
         .device = instance.GetDevice(),
         .queue = graphics_queue,
         .queue_family_index = instance.GetGraphicsQueueFamilyIndex(),
-        .width = width,
-        .height = height,
-        .flow_scale =
-            static_cast<float>(Settings::values.frame_generation_flow_scale.GetValue()) / 100.0f,
-        .performance_mode = Settings::values.frame_generation_performance_mode.GetValue(),
+        .width = config.width,
+        .height = config.height,
+        .generated_frames = config.multiplier - 1,
+        .flow_scale = static_cast<float>(config.flow_scale) / 100.0f,
+        .performance_mode = config.performance_mode,
     };
 
-    std::scoped_lock submit_lock{scheduler.submit_mutex};
-    lsfg_bridge = CreateLsfgBridge(info);
+    {
+        std::scoped_lock submit_lock{scheduler.submit_mutex};
+        lsfg_bridge = CreateLsfgBridge(info);
+    }
+
+    lsfg_unavailable.store(lsfg_bridge == nullptr, std::memory_order_relaxed);
+    if (!lsfg_bridge) {
+        frame->frame_gen = {FrameGenerationState::Unavailable, 0};
+    }
+    VideoCore::PublishFrameGenerationDecision(frame->frame_gen);
 }
 
 bool PresentWindow::CopyToSwapchainGenerated(Frame* frame) {
-    VkImage generated{};
+    std::array<VkImage, kMaxGeneratedFrames> generated{};
+    u32 generated_count = 0;
     try {
         std::scoped_lock submit_lock{scheduler.submit_mutex};
-        generated = lsfg_bridge->RecordFrame(frame->image, frame->render_ready);
+        generated_count = lsfg_bridge->RecordFrame(frame->image, frame->render_ready, generated);
     } catch (const std::exception& e) {
-        LOG_ERROR(Render_Vulkan, "Frame generation failed, reverting to plain presentation: {}",
+        LOG_ERROR(Render_Vulkan, "Frame generation failed {}",
                   e.what());
         ResetFrameGeneration();
+        lsfg_unavailable.store(true, std::memory_order_relaxed);
+        VideoCore::PublishFrameGenerationDecision(
+            {VideoCore::FrameGenerationState::Unavailable, 0});
         return false;
     }
 
@@ -459,10 +506,10 @@ bool PresentWindow::CopyToSwapchainGenerated(Frame* frame) {
         SubmitAndPresent(cmdbuf, VK_NULL_HANDLE, fence);
     };
 
-    if (generated) {
-        blit_and_present(frame->generated_cmdbuf,
+    for (u32 i = 0; i < generated_count; i++) {
+        blit_and_present(frame->generated_cmdbufs[i],
                          BlitSource{
-                             .image = vk::Image{generated},
+                             .image = vk::Image{generated[i]},
                              .width = frame->width,
                              .height = frame->height,
                              .layout = vk::ImageLayout::eGeneral,
@@ -629,8 +676,9 @@ void PresentWindow::CopyToSwapchain(Frame* frame) {
 #endif
 
 #ifdef ENABLE_LSFG
-    UpdateFrameGeneration(frame->width, frame->height);
-    if (lsfg_bridge && CopyToSwapchainGenerated(frame)) {
+    UpdateFrameGeneration(frame);
+    if (frame->frame_gen.state == VideoCore::FrameGenerationState::Active &&
+        CopyToSwapchainGenerated(frame)) {
         return;
     }
 #endif

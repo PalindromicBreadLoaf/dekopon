@@ -30,6 +30,7 @@
 #include "core/hle/service/ptm/ptm.h"
 #include "core/hw/unique_data.h"
 #ifdef ENABLE_LSFG
+#include "video_core/frame_generation.h"
 #include "video_core/renderer_vulkan/vk_lsfg.h"
 #endif
 
@@ -487,6 +488,25 @@ SettingsRow ColorChannel(const char* label, Settings::SwitchableSetting<float>& 
 }
 
 #ifdef ENABLE_LSFG
+SettingsRow FrameGenerationRow() {
+    auto& setting = Settings::values.use_frame_generation;
+    const auto get = [&setting] { return setting.GetValue(); };
+    return {"Frame Generation",
+            [get] {
+                if (!get()) {
+                    return BoolText(false);
+                }
+                const auto decision = VideoCore::GetFrameGenerationDecision();
+                std::string text =
+                    "On: " + std::string{VideoCore::FrameGenerationStateName(decision.state)};
+                if (decision.multiplier != 0) {
+                    text += " " + std::to_string(decision.multiplier) + "x";
+                }
+                return text;
+            },
+            [&setting](int dir) { setting = dir > 0; }, SettingsModal::None, get};
+}
+
 SettingsRow LosslessDllRow() {
     const bool present = Vulkan::IsLsfgShaderDllPresent();
     return {"Lossless.dll", [present] { return std::string{present ? "Found" : "Missing"}; },
@@ -1012,8 +1032,10 @@ std::vector<SettingsRow> BuildSettingsPage(SettingsPage page) {
             Toggle("Detect Display Refresh Rate", v.use_display_refresh_rate_detection),
             Toggle("Skip Duplicate Frames", v.use_skip_duplicate_frames),
 #ifdef ENABLE_LSFG
-            Toggle("Frame Generation", v.use_frame_generation),
+            FrameGenerationRow(),
             LosslessDllRow(),
+            Number("Frame Gen Max Multiplier", v.frame_generation_multiplier, 2, 4, 1, "x"),
+            Toggle("Frame Gen Above 60 Hz", v.frame_generation_high_refresh),
             Toggle("Frame Gen Performance Mode", v.frame_generation_performance_mode),
             Number("Frame Gen Flow Scale", v.frame_generation_flow_scale, 12, 100, 1, "%"),
 #endif
@@ -1166,6 +1188,10 @@ std::vector<SettingsRow> BuildQuickPage(QuickPage page) {
             Choice("Anisotropic Filtering", v.anisotropic_filtering, kAnisotropyNames),
             Toggle("Hardware Shader", v.use_hw_shader),
             Toggle("Custom Textures", v.custom_textures),
+#ifdef ENABLE_LSFG
+            FrameGenerationRow(),
+            Number("Frame Gen Max Multiplier", v.frame_generation_multiplier, 2, 4, 1, "x"),
+#endif
         };
     case QuickPage::Stereo:
         return {

@@ -572,6 +572,10 @@ struct Values {
         true, Keys::frame_generation_performance_mode};
     SwitchableSetting<u32, true> frame_generation_flow_scale{25, 12, 100,
                                                             Keys::frame_generation_flow_scale};
+    SwitchableSetting<u32, true> frame_generation_multiplier{2, 2, 4,
+                                                            Keys::frame_generation_multiplier};
+    SwitchableSetting<bool> frame_generation_high_refresh{false,
+                                                          Keys::frame_generation_high_refresh};
     SwitchableSetting<bool> shaders_accurate_mul{true, Keys::shaders_accurate_mul};
 #ifdef ANDROID // TODO: Fuck this -OS
     SwitchableSetting<bool> use_vsync{false, Keys::use_vsync};

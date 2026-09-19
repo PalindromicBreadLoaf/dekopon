@@ -9,6 +9,8 @@ add_library(video_core STATIC EXCLUDE_FROM_ALL
     custom_textures/material.h
     debug_utils/debug_utils.cpp
     debug_utils/debug_utils.h
+    frame_generation.cpp
+    frame_generation.h
     gpu.cpp
     gpu.h
     gpu_debugger.h

@@ -2,6 +2,7 @@
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
 
+#include <array>
 #include <atomic>
 #include <condition_variable>
 #include <mutex>
@@ -9,6 +10,7 @@
 #include "common/polyfill_thread.h"
 #include "video_core/renderer_vulkan/vk_swapchain.h"
 #ifdef ENABLE_LSFG
+#include "video_core/frame_generation.h"
 #include "video_core/renderer_vulkan/vk_lsfg.h"
 #endif
 
@@ -36,7 +38,8 @@ struct Frame {
     vk::Fence present_done;
     vk::CommandBuffer cmdbuf;
 #ifdef ENABLE_LSFG
-    vk::CommandBuffer generated_cmdbuf;
+    std::array<vk::CommandBuffer, kMaxGeneratedFrames> generated_cmdbufs;
+    VideoCore::FrameGenerationDecision frame_gen;
 #endif
 };
 
@@ -76,8 +79,6 @@ public:
 private:
     void PresentThread(std::stop_token token);
 
-    bool ShouldUsePresentThread() const;
-
     void RecreateSwapchain(u32 width, u32 height);
 
     void AcquireSwapchainImage(u32 width, u32 height);
@@ -101,7 +102,7 @@ private:
 #ifdef ENABLE_LSFG
     void ResetFrameGeneration();
 
-    void UpdateFrameGeneration(u32 width, u32 height);
+    void UpdateFrameGeneration(Frame* frame);
 
     bool CopyToSwapchainGenerated(Frame* frame);
 #endif
@@ -137,9 +138,18 @@ private:
     void* last_render_surface{};
 #ifdef ENABLE_LSFG
     LsfgBridgePtr lsfg_bridge;
-    u32 lsfg_width{};
-    u32 lsfg_height{};
+    struct LsfgConfig {
+        u32 width;
+        u32 height;
+        u32 multiplier;
+        u32 flow_scale;
+        bool performance_mode;
+
+        bool operator==(const LsfgConfig&) const = default;
+    };
+    LsfgConfig lsfg_config{};
     bool lsfg_attempted{};
+    std::atomic<bool> lsfg_unavailable{};
 #endif
 };
 

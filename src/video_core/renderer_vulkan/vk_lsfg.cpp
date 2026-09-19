@@ -62,7 +62,8 @@ class LsfgBridgeImpl final : public LsfgBridge {
 public:
     LsfgBridgeImpl(const LsfgBridgeInfo& info, const std::string& dll_path,
                    const std::string& cache_path)
-        : extent{info.width, info.height} {
+        : generated_frames{std::clamp(info.generated_frames, 1u, kMaxGeneratedFrames)},
+          extent{info.width, info.height} {
         const lsfgvk::backend::BorrowedDevice borrowed{
             .instance = info.instance,
             .physicalDevice = info.physical_device,
@@ -82,7 +83,8 @@ public:
         backend = std::make_unique<lsfgvk::backend::Instance>(
             borrowed, std::filesystem::path{dll_path}, false);
         context = &backend->openLocalContext(extent.width, extent.height, false, 1.0f / flow_scale,
-                                             info.performance_mode, 1, VK_QUEUE_FAMILY_IGNORED);
+                                             info.performance_mode, generated_frames,
+                                             VK_QUEUE_FAMILY_IGNORED);
         vulkan = &backend->vulkan();
 
         slots.reserve(kSlotCount);
@@ -90,8 +92,9 @@ public:
             slots.emplace_back(*vulkan);
         }
 
-        LOG_INFO(Render_Vulkan, "LSFG context opened at {}x{} (flow scale {}, {} mode, cache {})",
-                 extent.width, extent.height, flow_scale,
+        LOG_INFO(Render_Vulkan,
+                 "LSFG context opened at {}x{} ({}x, flow scale {}, {} mode, cache {})",
+                 extent.width, extent.height, generated_frames + 1, flow_scale,
                  info.performance_mode ? "performance" : "quality", cache_path);
     }
 
@@ -105,7 +108,8 @@ public:
     LsfgBridgeImpl(const LsfgBridgeImpl&) = delete;
     LsfgBridgeImpl& operator=(const LsfgBridgeImpl&) = delete;
 
-    VkImage RecordFrame(VkImage frame_image, VkSemaphore render_ready) override {
+    u32 RecordFrame(VkImage frame_image, VkSemaphore render_ready,
+                    std::span<VkImage> generated) override {
         Slot& slot = AcquireSlot();
 
         const size_t source_index = static_cast<size_t>((frame_index + 1) & 1);
@@ -146,7 +150,19 @@ public:
         source_initialized[source_index] = true;
         ++frame_index;
 
-        return interpolate ? backend->destinationImage(*context, 0) : VK_NULL_HANDLE;
+        if (!interpolate) {
+            return 0;
+        }
+
+        const u32 count = std::min(generated_frames, static_cast<u32>(generated.size()));
+        for (u32 i = 0; i < count; ++i) {
+            generated[i] = backend->destinationImage(*context, i);
+        }
+        return count;
+    }
+
+    void ResetHistory() override {
+        frame_index = 0;
     }
 
 private:
@@ -179,6 +195,7 @@ private:
     const vk::Vulkan* vulkan{};
     std::vector<Slot> slots;
     std::array<bool, 2> source_initialized{};
+    u32 generated_frames;
     VkExtent2D extent;
     u64 frame_index{};
     size_t slot_cursor{};

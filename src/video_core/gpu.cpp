@@ -21,6 +21,7 @@
 #include "core/memory.h"
 #include "core/perf_stats.h"
 #include "video_core/debug_utils/debug_utils.h"
+#include "video_core/frame_generation.h"
 #include "video_core/gpu.h"
 #include "video_core/gpu_debugger.h"
 #include "video_core/gpu_impl.h"
@@ -448,6 +449,7 @@ void GPU::SetBufferSwap(u32 screen_id, const Service::GSP::FrameBufferInfo& info
     if (screen_id == 0) {
         MicroProfileFlip();
         impl->system.perf_stats->EndGameFrame();
+        CountGuestFrame();
     } else {
         // A bottom-screen-only swap is still something new to present, but it is not a game frame.
         Core::PerfStats::game_frames_updated = true;
@@ -835,6 +837,8 @@ void GPU::VBlankCallback(std::uintptr_t user_data, s64 cycles_late) {
     // Signal to GSP that GPU interrupt has occurred
     impl->signal_interrupt(Service::GSP::InterruptId::PDC0, 0, 0);
     impl->signal_interrupt(Service::GSP::InterruptId::PDC1, 0, 0);
+
+    CountGuestVBlank();
 
     // Present renderered frame.
     SwapBuffers();
