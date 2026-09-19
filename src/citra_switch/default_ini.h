@@ -60,7 +60,7 @@ use_shader_jit =
 # Use lossless scaling (0, default). Needs a user-supplied Lossless.dll at
 # sdmc:/switch/dekopon/lsfg/Lossless.dll.
 use_frame_generation = false
-# Trade interpolation quality for chain cost (1, default).
+# Trade interpolation quality for cost (0, default).
 frame_generation_performance_mode =
 # Optical-flow resolution as a percentage of the interpolated image, 12-100 (25, default).
 # Chain cost grows with the square of this.

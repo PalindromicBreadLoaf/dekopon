@@ -6,6 +6,7 @@
 
 #include <array>
 #include <chrono>
+#include <span>
 #include <vector>
 
 #include "common/common_types.h"
@@ -70,7 +71,12 @@ struct PresentUniformData {
 static_assert(sizeof(PresentUniformData) == 112,
               "PresentUniformData does not structure in shader!");
 
-class RendererVulkan : public VideoCore::RendererBase {
+class RendererVulkan : public VideoCore::RendererBase
+#ifdef ENABLE_LSFG
+    ,
+                       public OverlayRecorder
+#endif
+{
     static constexpr std::size_t PRESENT_PIPELINES = 3;
 
 public:
@@ -105,7 +111,8 @@ private:
     void RenderToWindow(PresentWindow& window, const Layout::FramebufferLayout& layout,
                         bool flipped);
 
-    void DrawScreens(Frame* frame, const Layout::FramebufferLayout& layout, bool flipped);
+    void DrawScreens(Frame* frame, const Layout::FramebufferLayout& layout,
+                     const Layout::FramebufferLayout& overlay_layout, bool flipped);
     void DrawBottomScreen(const Layout::FramebufferLayout& layout,
                           const Common::Rectangle<u32>& bottom_screen);
 
@@ -120,26 +127,22 @@ private:
 
     void DrawCursor(const Layout::FramebufferLayout& layout);
 
-    // On-screen overlay geometry.
-    struct OverlayDraw {
-        struct Batch {
-            std::array<float, 4> color;
-            u32 first; // Vertex offset from base_vertex.
-            u32 count;
-        };
-        std::vector<Batch> batches;
-        u32 base_vertex{};
-    };
+    OverlayDraw PrepareFpsOverlay(const Layout::FramebufferLayout& layout, Frame* frame);
 
-    OverlayDraw PrepareFpsOverlay(const Layout::FramebufferLayout& layout);
+    OverlayDraw PrepareShaderNotice(const Layout::FramebufferLayout& layout, Frame* frame);
 
-    OverlayDraw PrepareShaderNotice(const Layout::FramebufferLayout& layout);
+    OverlayDraw PrepareToast(const Layout::FramebufferLayout& layout, Frame* frame);
 
-    OverlayDraw PrepareToast(const Layout::FramebufferLayout& layout);
+    OverlayDraw PrepareQuickMenu(const Layout::FramebufferLayout& layout, Frame* frame);
 
-    OverlayDraw PrepareQuickMenu(const Layout::FramebufferLayout& layout);
+    bool UploadOverlayVertices(Frame* frame, const std::vector<float>& verts, OverlayDraw& overlay);
 
     void RecordOverlay(OverlayDraw overlay);
+
+#ifdef ENABLE_LSFG
+    void RecordOverlays(vk::CommandBuffer cmdbuf, vk::Buffer vertex_buffer,
+                        std::span<const OverlayDraw> overlays) override;
+#endif
 
     void LoadFBToScreenInfo(const Pica::FramebufferConfig& framebuffer, ScreenInfo& screen_info,
                             bool right_eye);

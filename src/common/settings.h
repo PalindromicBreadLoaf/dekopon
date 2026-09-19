@@ -569,7 +569,7 @@ struct Values {
     SwitchableSetting<bool> use_skip_duplicate_frames{true, Keys::use_skip_duplicate_frames};
     SwitchableSetting<bool> use_frame_generation{false, Keys::use_frame_generation};
     SwitchableSetting<bool> frame_generation_performance_mode{
-        true, Keys::frame_generation_performance_mode};
+        false, Keys::frame_generation_performance_mode};
     SwitchableSetting<u32, true> frame_generation_flow_scale{25, 12, 100,
                                                             Keys::frame_generation_flow_scale};
     SwitchableSetting<u32, true> frame_generation_multiplier{2, 2, 4,

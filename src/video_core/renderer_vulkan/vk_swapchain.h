@@ -37,6 +37,14 @@ public:
         return images[image_index];
     }
 
+    const std::vector<vk::Image>& GetImages() const {
+        return images;
+    }
+
+    u32 GetImageIndex() const {
+        return image_index;
+    }
+
     vk::SurfaceFormatKHR GetSurfaceFormat() const {
         return surface_format;
     }

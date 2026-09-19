@@ -6,6 +6,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <mutex>
+#include <span>
 #include <queue>
 #include "common/polyfill_thread.h"
 #include "video_core/renderer_vulkan/vk_swapchain.h"
@@ -27,9 +28,41 @@ class Swapchain;
 class Scheduler;
 class RenderManager;
 
+struct OverlayDraw {
+    struct Batch {
+        std::array<float, 4> color;
+        u32 first;
+        u32 count;
+    };
+    std::vector<Batch> batches;
+    u32 base_vertex{};
+
+    void Clear() {
+        batches.clear();
+        base_vertex = 0;
+    }
+};
+
+constexpr u32 kOverlayCount = 4;
+
+#ifdef ENABLE_LSFG
+
+constexpr u64 kOverlayBufferSize = 256 * 1024;
+
+class OverlayRecorder {
+public:
+    virtual ~OverlayRecorder() = default;
+
+    virtual void RecordOverlays(vk::CommandBuffer cmdbuf, vk::Buffer vertex_buffer,
+                                std::span<const OverlayDraw> overlays) = 0;
+};
+#endif
+
 struct Frame {
     u32 width;
     u32 height;
+    u32 present_width;
+    u32 present_height;
     VmaAllocation allocation;
     vk::Framebuffer framebuffer;
     vk::Image image;
@@ -40,6 +73,12 @@ struct Frame {
 #ifdef ENABLE_LSFG
     std::array<vk::CommandBuffer, kMaxGeneratedFrames> generated_cmdbufs;
     VideoCore::FrameGenerationDecision frame_gen;
+    std::array<OverlayDraw, kOverlayCount> overlays;
+    bool overlays_deferred;
+    VmaAllocation overlay_allocation;
+    vk::Buffer overlay_buffer;
+    u8* overlay_data;
+    u64 overlay_offset;
 #endif
 };
 
@@ -61,6 +100,14 @@ public:
     /// Queues the provided frame for presentation.
     void Present(Frame* frame);
 
+#ifdef ENABLE_LSFG
+    [[nodiscard]] VideoCore::FrameGenerationDecision ClassifyFrameGeneration();
+
+    void SetOverlayRecorder(OverlayRecorder* recorder) {
+        overlay_recorder = recorder;
+    }
+#endif
+
     /// This is called to notify the rendering backend of a surface change
     void NotifySurfaceChanged();
 
@@ -74,6 +121,10 @@ public:
 
     vk::Format GetSurfaceFormat() const noexcept {
         return swapchain.GetSurfaceFormat().format;
+    }
+
+    bool CanScalePresent() const noexcept {
+        return blit_supported;
     }
 
 private:
@@ -93,13 +144,21 @@ private:
     };
 
     void RecordBlitToSwapchain(vk::CommandBuffer cmdbuf, const BlitSource& source,
-                               vk::Image swapchain_image);
+                               vk::Image swapchain_image, bool overlay_follows);
 
     void SubmitAndPresent(vk::CommandBuffer cmdbuf, vk::Semaphore render_ready, vk::Fence fence);
 
     void CopyToSwapchain(Frame* frame);
 
 #ifdef ENABLE_LSFG
+    void CreateOverlayBuffer(Frame& frame);
+
+    vk::RenderPass CreateOverlayRenderpass();
+
+    void RecreateOverlayTargets();
+
+    void RecordOverlayPass(vk::CommandBuffer cmdbuf, const Frame* frame);
+
     void ResetFrameGeneration();
 
     void UpdateFrameGeneration(Frame* frame);
@@ -150,6 +209,10 @@ private:
     LsfgConfig lsfg_config{};
     bool lsfg_attempted{};
     std::atomic<bool> lsfg_unavailable{};
+    OverlayRecorder* overlay_recorder{};
+    vk::RenderPass overlay_renderpass;
+    std::vector<vk::ImageView> overlay_views;
+    std::vector<vk::Framebuffer> overlay_framebuffers;
 #endif
 };
 

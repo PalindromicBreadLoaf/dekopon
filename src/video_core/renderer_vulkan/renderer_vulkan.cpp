@@ -2,11 +2,13 @@
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
 
+#include "common/alignment.h"
 #include "common/assert.h"
 #include "common/logging/log.h"
 #include "common/memory_detect.h"
 #include "common/microprofile.h"
 #include "common/settings.h"
+#include "core/3ds.h"
 #include "core/core.h"
 #include "core/frontend/emu_window.h"
 #include "video_core/gpu.h"
@@ -153,12 +155,18 @@ RendererVulkan::RendererVulkan(Core::System& system, Pica::PicaCore& pica_,
         secondary_present_window_ptr = std::make_unique<PresentWindow>(
             *secondary_window, instance, scheduler, IsLowRefreshRate());
     }
+#ifdef ENABLE_LSFG
+    main_present_window.SetOverlayRecorder(this);
+#endif
 }
 
 RendererVulkan::~RendererVulkan() {
     vk::Device device = instance.GetDevice();
     scheduler.Finish();
     main_present_window.WaitPresent();
+#ifdef ENABLE_LSFG
+    main_present_window.SetOverlayRecorder(nullptr);
+#endif
     device.waitIdle();
 
     device.destroyShaderModule(present_vertex_shader);
@@ -295,6 +303,68 @@ void RendererVulkan::PrepareDraw(Frame* frame, const Layout::FramebufferLayout& 
     });
 }
 
+namespace {
+Layout::FramebufferLayout ScaleLayoutToNative(const Layout::FramebufferLayout& layout,
+                                              u32 resolution_scale) {
+    const u32 native_top = layout.is_rotated ? Core::kScreenTopWidth : Core::kScreenTopHeight;
+    const u32 native_bottom =
+        layout.is_rotated ? Core::kScreenBottomWidth : Core::kScreenBottomHeight;
+
+    const auto needed = [resolution_scale](const Common::Rectangle<u32>& rect, u32 native) {
+        const u32 width = rect.GetWidth();
+        return width == 0
+                   ? 0.0f
+                   : static_cast<float>(native * resolution_scale) / static_cast<float>(width);
+    };
+
+    float scale = 0.0f;
+    if (layout.top_screen_enabled) {
+        scale = std::max(scale, needed(layout.top_screen, native_top));
+    }
+    if (layout.bottom_screen_enabled) {
+        scale = std::max(scale, needed(layout.bottom_screen, native_bottom));
+    }
+    if (layout.additional_screen_enabled) {
+        scale = std::max(scale,
+                         needed(layout.additional_screen,
+                                layout.additional_screen_is_bottom ? native_bottom : native_top));
+    }
+
+    if (!(scale > 0.0f) || scale >= 1.0f) {
+        return layout;
+    }
+
+    const u32 width = std::max(1u, static_cast<u32>(std::lround(layout.width * scale)));
+    const u32 height = std::max(1u, static_cast<u32>(std::lround(layout.height * scale)));
+
+    const auto coord = [&](u32 value, u32 from, u32 to) {
+        return value >= from ? to : static_cast<u32>(std::lround(value * scale));
+    };
+    const auto scale_rect = [&](const Common::Rectangle<u32>& rect) {
+        return Common::Rectangle<u32>{
+            coord(rect.left, layout.width, width),
+            coord(rect.top, layout.height, height),
+            coord(rect.right, layout.width, width),
+            coord(rect.bottom, layout.height, height),
+        };
+    };
+
+    Layout::FramebufferLayout reduced = layout;
+    reduced.width = width;
+    reduced.height = height;
+    reduced.top_screen = scale_rect(layout.top_screen);
+    reduced.bottom_screen = scale_rect(layout.bottom_screen);
+    reduced.additional_screen = scale_rect(layout.additional_screen);
+    reduced.cardboard.top_screen_right_eye =
+        static_cast<u32>(std::lround(layout.cardboard.top_screen_right_eye * scale));
+    reduced.cardboard.bottom_screen_right_eye =
+        static_cast<u32>(std::lround(layout.cardboard.bottom_screen_right_eye * scale));
+    reduced.cardboard.user_x_shift =
+        static_cast<s32>(std::lround(layout.cardboard.user_x_shift * scale));
+    return reduced;
+}
+} // Anonymous namespace
+
 void RendererVulkan::RenderToWindow(PresentWindow& window, const Layout::FramebufferLayout& layout,
                                     bool flipped) {
     const bool skip_duplicates = Settings::values.use_skip_duplicate_frames.GetValue()
@@ -305,18 +375,36 @@ void RendererVulkan::RenderToWindow(PresentWindow& window, const Layout::Framebu
     if (!skip_duplicates || Core::PerfStats::game_frames_updated) {
         Frame* frame = window.GetRenderFrame();
 
-        if (layout.width != frame->width || layout.height != frame->height) {
+        Layout::FramebufferLayout compose_layout = layout;
+#ifdef ENABLE_LSFG
+        frame->overlays_deferred = false;
+        if (&window == &main_present_window) {
+            frame->frame_gen = window.ClassifyFrameGeneration();
+            if (frame->frame_gen.state == VideoCore::FrameGenerationState::Active &&
+                window.CanScalePresent()) {
+                compose_layout = ScaleLayoutToNative(layout, GetResolutionScaleFactor());
+                frame->overlays_deferred =
+                    compose_layout.width != layout.width || compose_layout.height != layout.height;
+            }
+        } else {
+            frame->frame_gen = {};
+        }
+#endif
+
+        if (compose_layout.width != frame->width || compose_layout.height != frame->height) {
             window.WaitPresent();
             scheduler.Finish();
-            window.RecreateFrame(frame, layout.width, layout.height);
+            window.RecreateFrame(frame, compose_layout.width, compose_layout.height);
         }
+        frame->present_width = layout.width;
+        frame->present_height = layout.height;
 
         clear_color.float32[0] = Settings::values.bg_red.GetValue();
         clear_color.float32[1] = Settings::values.bg_green.GetValue();
         clear_color.float32[2] = Settings::values.bg_blue.GetValue();
         clear_color.float32[3] = 1.0f;
 
-        DrawScreens(frame, layout, flipped);
+        DrawScreens(frame, compose_layout, layout, flipped);
         scheduler.Flush(frame->render_ready);
         window.Present(frame);
         if ((secondaryWindowEnabled && isSecondaryWindow) || (!secondaryWindowEnabled)) {
@@ -1403,7 +1491,7 @@ void RendererVulkan::DrawBottomScreen(const Layout::FramebufferLayout& layout,
 }
 
 void RendererVulkan::DrawScreens(Frame* frame, const Layout::FramebufferLayout& layout,
-                                 bool flipped) {
+                                 const Layout::FramebufferLayout& overlay_layout, bool flipped) {
     if (settings.bg_color_update_requested.exchange(false)) {
         clear_color.float32[0] = Settings::values.bg_red.GetValue();
         clear_color.float32[1] = Settings::values.bg_green.GetValue();
@@ -1416,10 +1504,13 @@ void RendererVulkan::DrawScreens(Frame* frame, const Layout::FramebufferLayout& 
     // Build overlay geometry before the present render pass opens otherwise a flush
     // can happen mid build causing a crash.
     renderpass_cache.EndRendering();
-    OverlayDraw fps_overlay = PrepareFpsOverlay(layout);
-    OverlayDraw shader_notice = PrepareShaderNotice(layout);
-    OverlayDraw toast = PrepareToast(layout);
-    OverlayDraw quick_menu = PrepareQuickMenu(layout);
+#ifdef ENABLE_LSFG
+    frame->overlay_offset = 0;
+#endif
+    OverlayDraw fps_overlay = PrepareFpsOverlay(overlay_layout, frame);
+    OverlayDraw shader_notice = PrepareShaderNotice(overlay_layout, frame);
+    OverlayDraw toast = PrepareToast(overlay_layout, frame);
+    OverlayDraw quick_menu = PrepareQuickMenu(overlay_layout, frame);
 
     PrepareDraw(frame, layout);
 
@@ -1459,10 +1550,20 @@ void RendererVulkan::DrawScreens(Frame* frame, const Layout::FramebufferLayout& 
 
     DrawCursor(layout);
 
-    RecordOverlay(std::move(fps_overlay));
-    RecordOverlay(std::move(shader_notice));
-    RecordOverlay(std::move(toast));
-    RecordOverlay(std::move(quick_menu));
+#ifdef ENABLE_LSFG
+    if (frame->overlays_deferred) {
+        frame->overlays[0] = std::move(fps_overlay);
+        frame->overlays[1] = std::move(shader_notice);
+        frame->overlays[2] = std::move(toast);
+        frame->overlays[3] = std::move(quick_menu);
+    } else
+#endif
+    {
+        RecordOverlay(std::move(fps_overlay));
+        RecordOverlay(std::move(shader_notice));
+        RecordOverlay(std::move(toast));
+        RecordOverlay(std::move(quick_menu));
+    }
 
     scheduler.Record([](vk::CommandBuffer cmdbuf) { cmdbuf.endRenderPass(); });
 }
@@ -1640,8 +1741,8 @@ private:
 };
 } // namespace
 
-RendererVulkan::OverlayDraw RendererVulkan::PrepareFpsOverlay(
-    const Layout::FramebufferLayout& layout) {
+OverlayDraw RendererVulkan::PrepareFpsOverlay(const Layout::FramebufferLayout& layout,
+                                              Frame* frame) {
     if (!Settings::values.show_fps.GetValue()) {
         return {};
     }
@@ -1699,16 +1800,13 @@ RendererVulkan::OverlayDraw RendererVulkan::PrepareFpsOverlay(
     builder.AddText(margin, margin, text, scale);
     const u32 glyph_vertices = builder.VertexCount() - box_vertices;
 
-    const u64 size = verts.size() * sizeof(float);
-    auto [data, offset, invalidate] = overlay_vertex_buffer.Map(size, 16);
-    std::memcpy(data, verts.data(), size);
-    overlay_vertex_buffer.Commit(size);
-
     constexpr std::array<float, 4> box_color = {0.0f, 0.0f, 0.0f, 0.55f};
     constexpr std::array<float, 4> text_color = {0.53f, 1.0f, 0.53f, 1.0f};
 
     OverlayDraw overlay;
-    overlay.base_vertex = static_cast<u32>(offset) / (sizeof(float) * 4);
+    if (!UploadOverlayVertices(frame, verts, overlay)) {
+        return {};
+    }
     overlay.batches.push_back({box_color, 0, box_vertices});
     if (glyph_vertices > 0) {
         overlay.batches.push_back({text_color, box_vertices, glyph_vertices});
@@ -1716,8 +1814,8 @@ RendererVulkan::OverlayDraw RendererVulkan::PrepareFpsOverlay(
     return overlay;
 }
 
-RendererVulkan::OverlayDraw RendererVulkan::PrepareShaderNotice(
-    const Layout::FramebufferLayout& layout) {
+OverlayDraw RendererVulkan::PrepareShaderNotice(const Layout::FramebufferLayout& layout,
+                                                Frame* frame) {
     if (!Settings::values.show_shader_compile_notice.GetValue()) {
         return {};
     }
@@ -1776,16 +1874,13 @@ RendererVulkan::OverlayDraw RendererVulkan::PrepareShaderNotice(
     builder.AddText(ox, oy, text, scale);
     const u32 glyph_vertices = builder.VertexCount() - box_vertices;
 
-    const u64 size = verts.size() * sizeof(float);
-    auto [data, offset, invalidate] = overlay_vertex_buffer.Map(size, 16);
-    std::memcpy(data, verts.data(), size);
-    overlay_vertex_buffer.Commit(size);
-
     constexpr std::array<float, 4> box_color = {0.0f, 0.0f, 0.0f, 0.55f};
     constexpr std::array<float, 4> text_color = {1.0f, 0.82f, 0.35f, 1.0f};
 
     OverlayDraw overlay;
-    overlay.base_vertex = static_cast<u32>(offset) / (sizeof(float) * 4);
+    if (!UploadOverlayVertices(frame, verts, overlay)) {
+        return {};
+    }
     overlay.batches.push_back({box_color, 0, box_vertices});
     if (glyph_vertices > 0) {
         overlay.batches.push_back({text_color, box_vertices, glyph_vertices});
@@ -1793,7 +1888,7 @@ RendererVulkan::OverlayDraw RendererVulkan::PrepareShaderNotice(
     return overlay;
 }
 
-RendererVulkan::OverlayDraw RendererVulkan::PrepareToast(const Layout::FramebufferLayout& layout) {
+OverlayDraw RendererVulkan::PrepareToast(const Layout::FramebufferLayout& layout, Frame* frame) {
     const std::string text = VideoCore::GetOverlayToast();
     if (text.empty()) {
         return {};
@@ -1838,16 +1933,13 @@ RendererVulkan::OverlayDraw RendererVulkan::PrepareToast(const Layout::Framebuff
     builder.AddText(ox, oy, text, scale);
     const u32 glyph_vertices = builder.VertexCount() - box_vertices;
 
-    const u64 size = verts.size() * sizeof(float);
-    auto [data, offset, invalidate] = overlay_vertex_buffer.Map(size, 16);
-    std::memcpy(data, verts.data(), size);
-    overlay_vertex_buffer.Commit(size);
-
     constexpr std::array<float, 4> box_color = {0.05f, 0.06f, 0.08f, 0.85f};
     constexpr std::array<float, 4> text_color = {1.0f, 1.0f, 1.0f, 1.0f};
 
     OverlayDraw overlay;
-    overlay.base_vertex = static_cast<u32>(offset) / (sizeof(float) * 4);
+    if (!UploadOverlayVertices(frame, verts, overlay)) {
+        return {};
+    }
     overlay.batches.push_back({box_color, 0, box_vertices});
     if (glyph_vertices > 0) {
         overlay.batches.push_back({text_color, box_vertices, glyph_vertices});
@@ -1855,8 +1947,8 @@ RendererVulkan::OverlayDraw RendererVulkan::PrepareToast(const Layout::Framebuff
     return overlay;
 }
 
-RendererVulkan::OverlayDraw RendererVulkan::PrepareQuickMenu(
-    const Layout::FramebufferLayout& layout) {
+OverlayDraw RendererVulkan::PrepareQuickMenu(const Layout::FramebufferLayout& layout,
+                                             Frame* frame) {
     if (!VideoCore::IsOverlayMenuVisible()) {
         return {};
     }
@@ -2022,16 +2114,64 @@ RendererVulkan::OverlayDraw RendererVulkan::PrepareQuickMenu(
         return {};
     }
 
-    const u32 size = static_cast<u32>(verts.size() * sizeof(float));
-    auto [data, offset, invalidate] = overlay_vertex_buffer.Map(size, 16);
-    std::memcpy(data, verts.data(), size);
-    overlay_vertex_buffer.Commit(size);
-
     OverlayDraw overlay;
-    overlay.base_vertex = static_cast<u32>(offset) / (sizeof(float) * 4);
+    if (!UploadOverlayVertices(frame, verts, overlay)) {
+        return {};
+    }
     overlay.batches = std::move(batches);
     return overlay;
 }
+
+bool RendererVulkan::UploadOverlayVertices(Frame* frame, const std::vector<float>& verts,
+                                           OverlayDraw& overlay) {
+    const u64 size = verts.size() * sizeof(float);
+    if (size == 0) {
+        return false;
+    }
+
+#ifdef ENABLE_LSFG
+    if (frame->overlays_deferred) {
+        const u64 offset = Common::AlignUp(frame->overlay_offset, 16);
+        if (!frame->overlay_data || offset + size > kOverlayBufferSize) {
+            return false;
+        }
+        std::memcpy(frame->overlay_data + offset, verts.data(), size);
+        frame->overlay_offset = offset + size;
+        overlay.base_vertex = static_cast<u32>(offset / (sizeof(float) * 4));
+        return true;
+    }
+#endif
+
+    auto [data, offset, invalidate] = overlay_vertex_buffer.Map(size, 16);
+    std::memcpy(data, verts.data(), size);
+    overlay_vertex_buffer.Commit(size);
+    overlay.base_vertex = static_cast<u32>(offset) / (sizeof(float) * 4);
+    return true;
+}
+
+#ifdef ENABLE_LSFG
+void RendererVulkan::RecordOverlays(vk::CommandBuffer cmdbuf, vk::Buffer vertex_buffer,
+                                    std::span<const OverlayDraw> overlays) {
+    bool bound = false;
+    for (const OverlayDraw& overlay : overlays) {
+        if (overlay.batches.empty()) {
+            continue;
+        }
+        if (!bound) {
+            cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, overlay_pipeline);
+            cmdbuf.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *overlay_pipeline_layout, 0,
+                                      overlay_descriptor_set, {});
+            cmdbuf.bindVertexBuffers(0, vertex_buffer, {0});
+            bound = true;
+        }
+        for (const auto& b : overlay.batches) {
+            cmdbuf.pushConstants(*overlay_pipeline_layout, vk::ShaderStageFlagBits::eFragment, 0,
+                                 static_cast<u32>(b.color.size() * sizeof(float)), b.color.data());
+            cmdbuf.draw(b.count, 1, overlay.base_vertex + b.first, 0);
+        }
+    }
+}
+#endif
 
 void RendererVulkan::RecordOverlay(OverlayDraw overlay) {
     if (overlay.batches.empty()) {
@@ -2162,7 +2302,7 @@ void RendererVulkan::RenderScreenshotWithStagingCopy() {
     Frame frame{};
     main_present_window.RecreateFrame(&frame, width, height);
 
-    DrawScreens(&frame, layout, false);
+    DrawScreens(&frame, layout, layout, false);
 
     scheduler.Record(
         [width, height, source_image = frame.image, staging_buffer](vk::CommandBuffer cmdbuf) {
@@ -2344,7 +2484,7 @@ bool RendererVulkan::TryRenderScreenshotWithHostMemory() {
     Frame frame{};
     main_present_window.RecreateFrame(&frame, width, height);
 
-    DrawScreens(&frame, layout, false);
+    DrawScreens(&frame, layout, layout, false);
 
     scheduler.Record([buffer_image_copy, source_image = frame.image,
                       imported_buffer = imported_buffer.get()](vk::CommandBuffer cmdbuf) {

@@ -149,6 +149,9 @@ PresentWindow::PresentWindow(Frontend::EmuWindow& emu_window_, const Instance& i
 #endif
         frame.render_ready = device.createSemaphore({});
         frame.present_done = device.createFence({.flags = vk::FenceCreateFlagBits::eSignaled});
+#ifdef ENABLE_LSFG
+        CreateOverlayBuffer(frame);
+#endif
         free_queue.push(&frame);
     }
 
@@ -161,6 +164,11 @@ PresentWindow::PresentWindow(Frontend::EmuWindow& emu_window_, const Instance& i
                           i);
         }
     }
+
+#ifdef ENABLE_LSFG
+    overlay_renderpass = CreateOverlayRenderpass();
+    RecreateOverlayTargets();
+#endif
 
     if (use_present_thread) {
         present_thread = std::jthread([this](std::stop_token token) { PresentThread(token); });
@@ -181,12 +189,27 @@ PresentWindow::~PresentWindow() {
     device.waitIdle();
     device.destroyCommandPool(command_pool);
     device.destroyRenderPass(present_renderpass);
+#ifdef ENABLE_LSFG
+    for (auto framebuffer : overlay_framebuffers) {
+        device.destroyFramebuffer(framebuffer);
+    }
+    for (auto view : overlay_views) {
+        device.destroyImageView(view);
+    }
+    device.destroyRenderPass(overlay_renderpass);
+#endif
     for (auto& frame : swap_chain) {
         device.destroyImageView(frame.image_view);
         device.destroyFramebuffer(frame.framebuffer);
         device.destroySemaphore(frame.render_ready);
         device.destroyFence(frame.present_done);
         vmaDestroyImage(instance.GetAllocator(), frame.image, frame.allocation);
+#ifdef ENABLE_LSFG
+        if (frame.overlay_buffer) {
+            vmaDestroyBuffer(instance.GetAllocator(), frame.overlay_buffer,
+                             frame.overlay_allocation);
+        }
+#endif
     }
 }
 
@@ -259,6 +282,8 @@ void PresentWindow::RecreateFrame(Frame* frame, u32 width, u32 height) {
 
     frame->width = width;
     frame->height = height;
+    frame->present_width = width;
+    frame->present_height = height;
 }
 
 Frame* PresentWindow::GetRenderFrame() {
@@ -299,14 +324,146 @@ Frame* PresentWindow::GetRenderFrame() {
     return frame;
 }
 
+#ifdef ENABLE_LSFG
+void PresentWindow::CreateOverlayBuffer(Frame& frame) {
+    const VkBufferCreateInfo buffer_info{
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = kOverlayBufferSize,
+        .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+    };
+    const VmaAllocationCreateInfo alloc_info{
+        .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+                 VMA_ALLOCATION_CREATE_MAPPED_BIT,
+        .usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST,
+        .requiredFlags = VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+    };
+
+    VkBuffer buffer{};
+    VmaAllocationInfo mapping{};
+    if (vmaCreateBuffer(instance.GetAllocator(), &buffer_info, &alloc_info, &buffer,
+                        &frame.overlay_allocation, &mapping) != VK_SUCCESS) {
+        LOG_WARNING(Render_Vulkan, "Could not allocate an overlay vertex buffer");
+        return;
+    }
+    frame.overlay_buffer = vk::Buffer{buffer};
+    frame.overlay_data = static_cast<u8*>(mapping.pMappedData);
+}
+
+vk::RenderPass PresentWindow::CreateOverlayRenderpass() {
+    const vk::AttachmentReference color_ref = {
+        .attachment = 0,
+        .layout = vk::ImageLayout::eGeneral,
+    };
+
+    const vk::SubpassDescription subpass = {
+        .pipelineBindPoint = vk::PipelineBindPoint::eGraphics,
+        .colorAttachmentCount = 1u,
+        .pColorAttachments = &color_ref,
+    };
+
+    const vk::AttachmentDescription color_attachment = {
+        .format = swapchain.GetSurfaceFormat().format,
+        .loadOp = vk::AttachmentLoadOp::eLoad,
+        .storeOp = vk::AttachmentStoreOp::eStore,
+        .stencilLoadOp = vk::AttachmentLoadOp::eDontCare,
+        .stencilStoreOp = vk::AttachmentStoreOp::eDontCare,
+        .initialLayout = vk::ImageLayout::eGeneral,
+        .finalLayout = vk::ImageLayout::ePresentSrcKHR,
+    };
+
+    const vk::RenderPassCreateInfo renderpass_info = {
+        .attachmentCount = 1,
+        .pAttachments = &color_attachment,
+        .subpassCount = 1,
+        .pSubpasses = &subpass,
+    };
+
+    return instance.GetDevice().createRenderPass(renderpass_info);
+}
+
+void PresentWindow::RecreateOverlayTargets() {
+    const vk::Device device = instance.GetDevice();
+    for (auto framebuffer : overlay_framebuffers) {
+        device.destroyFramebuffer(framebuffer);
+    }
+    for (auto view : overlay_views) {
+        device.destroyImageView(view);
+    }
+    overlay_framebuffers.clear();
+    overlay_views.clear();
+
+    const vk::Extent2D extent = swapchain.GetExtent();
+    const vk::Format format = swapchain.GetSurfaceFormat().format;
+    for (const vk::Image image : swapchain.GetImages()) {
+        const vk::ImageViewCreateInfo view_info = {
+            .image = image,
+            .viewType = vk::ImageViewType::e2D,
+            .format = format,
+            .subresourceRange{
+                .aspectMask = vk::ImageAspectFlagBits::eColor,
+                .baseMipLevel = 0,
+                .levelCount = 1,
+                .baseArrayLayer = 0,
+                .layerCount = 1,
+            },
+        };
+        const vk::ImageView view = device.createImageView(view_info);
+        overlay_views.push_back(view);
+
+        const vk::FramebufferCreateInfo framebuffer_info = {
+            .renderPass = overlay_renderpass,
+            .attachmentCount = 1,
+            .pAttachments = &view,
+            .width = extent.width,
+            .height = extent.height,
+            .layers = 1,
+        };
+        overlay_framebuffers.push_back(device.createFramebuffer(framebuffer_info));
+    }
+}
+
+void PresentWindow::RecordOverlayPass(vk::CommandBuffer cmdbuf, const Frame* frame) {
+    const u32 index = swapchain.GetImageIndex();
+    if (index >= overlay_framebuffers.size()) {
+        return;
+    }
+
+    const vk::Extent2D extent = swapchain.GetExtent();
+    cmdbuf.setViewport(0, vk::Viewport{
+                              .x = 0.0f,
+                              .y = 0.0f,
+                              .width = static_cast<float>(extent.width),
+                              .height = static_cast<float>(extent.height),
+                              .minDepth = 0.0f,
+                              .maxDepth = 1.0f,
+                          });
+    cmdbuf.setScissor(0, vk::Rect2D{.offset = {0, 0}, .extent = extent});
+
+    cmdbuf.beginRenderPass(
+        vk::RenderPassBeginInfo{
+            .renderPass = overlay_renderpass,
+            .framebuffer = overlay_framebuffers[index],
+            .renderArea = vk::Rect2D{.offset = {0, 0}, .extent = extent},
+        },
+        vk::SubpassContents::eInline);
+    overlay_recorder->RecordOverlays(cmdbuf, frame->overlay_buffer, frame->overlays);
+    cmdbuf.endRenderPass();
+}
+
+VideoCore::FrameGenerationDecision PresentWindow::ClassifyFrameGeneration() {
+    auto decision = VideoCore::UpdateFrameGenerationGate();
+    if (decision.state == VideoCore::FrameGenerationState::Active &&
+        lsfg_unavailable.load(std::memory_order_relaxed)) {
+        decision = {VideoCore::FrameGenerationState::Unavailable, 0};
+    }
+    return decision;
+}
+#endif
+
 void PresentWindow::Present(Frame* frame) {
     bool generating = false;
 #ifdef ENABLE_LSFG
-    frame->frame_gen = VideoCore::UpdateFrameGenerationGate();
-    if (frame->frame_gen.state == VideoCore::FrameGenerationState::Active &&
-        lsfg_unavailable.load(std::memory_order_relaxed)) {
-        frame->frame_gen = {VideoCore::FrameGenerationState::Unavailable, 0};
-    }
     generating = frame->frame_gen.state == VideoCore::FrameGenerationState::Active;
 #endif
 
@@ -495,13 +652,19 @@ bool PresentWindow::CopyToSwapchainGenerated(Frame* frame) {
         return false;
     }
 
+    const bool overlays =
+        frame->overlays_deferred && overlay_recorder != nullptr && frame->overlay_buffer;
+
     const auto blit_and_present = [&](vk::CommandBuffer cmdbuf, const BlitSource& source,
                                       vk::Fence fence) {
-        AcquireSwapchainImage(frame->width, frame->height);
+        AcquireSwapchainImage(frame->present_width, frame->present_height);
         cmdbuf.begin(vk::CommandBufferBeginInfo{
             .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit,
         });
-        RecordBlitToSwapchain(cmdbuf, source, swapchain.Image());
+        RecordBlitToSwapchain(cmdbuf, source, swapchain.Image(), overlays);
+        if (overlays) {
+            RecordOverlayPass(cmdbuf, frame);
+        }
         cmdbuf.end();
         SubmitAndPresent(cmdbuf, VK_NULL_HANDLE, fence);
     };
@@ -544,6 +707,9 @@ void PresentWindow::RecreateSwapchain(u32 width, u32 height) {
     std::scoped_lock submit_lock{scheduler.submit_mutex};
     graphics_queue.waitIdle();
     swapchain.Create(width, height, surface, low_refresh_rate);
+#ifdef ENABLE_LSFG
+    RecreateOverlayTargets();
+#endif
 }
 
 void PresentWindow::AcquireSwapchainImage(u32 width, u32 height) {
@@ -553,7 +719,7 @@ void PresentWindow::AcquireSwapchainImage(u32 width, u32 height) {
 }
 
 void PresentWindow::RecordBlitToSwapchain(vk::CommandBuffer cmdbuf, const BlitSource& source,
-                                          vk::Image swapchain_image) {
+                                          vk::Image swapchain_image, bool overlay_follows) {
     const vk::ImageSubresourceRange subresource_range{
         .aspectMask = vk::ImageAspectFlagBits::eColor,
         .baseMipLevel = 0,
@@ -588,9 +754,12 @@ void PresentWindow::RecordBlitToSwapchain(vk::CommandBuffer cmdbuf, const BlitSo
     std::array post_barriers{
         vk::ImageMemoryBarrier{
             .srcAccessMask = vk::AccessFlagBits::eTransferWrite,
-            .dstAccessMask = vk::AccessFlagBits::eMemoryRead,
+            .dstAccessMask = overlay_follows ? vk::AccessFlagBits::eColorAttachmentWrite |
+                                                   vk::AccessFlagBits::eColorAttachmentRead
+                                             : vk::AccessFlagBits::eMemoryRead,
             .oldLayout = vk::ImageLayout::eTransferDstOptimal,
-            .newLayout = vk::ImageLayout::ePresentSrcKHR,
+            .newLayout =
+                overlay_follows ? vk::ImageLayout::eGeneral : vk::ImageLayout::ePresentSrcKHR,
             .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .image = swapchain_image,
@@ -666,12 +835,12 @@ void PresentWindow::SubmitAndPresent(vk::CommandBuffer cmdbuf, vk::Semaphore ren
 void PresentWindow::CopyToSwapchain(Frame* frame) {
 #ifndef ANDROID
     const bool use_vsync = Settings::values.use_vsync.GetValue();
-    const bool size_changed =
-        swapchain.GetWidth() != frame->width || swapchain.GetHeight() != frame->height;
+    const bool size_changed = swapchain.GetWidth() != frame->present_width ||
+                              swapchain.GetHeight() != frame->present_height;
     const bool vsync_changed = vsync_enabled != use_vsync;
     if (vsync_changed || size_changed) [[unlikely]] {
         vsync_enabled = use_vsync;
-        RecreateSwapchain(frame->width, frame->height);
+        RecreateSwapchain(frame->present_width, frame->present_height);
     }
 #endif
 
@@ -683,7 +852,12 @@ void PresentWindow::CopyToSwapchain(Frame* frame) {
     }
 #endif
 
-    AcquireSwapchainImage(frame->width, frame->height);
+    AcquireSwapchainImage(frame->present_width, frame->present_height);
+
+    bool overlays = false;
+#ifdef ENABLE_LSFG
+    overlays = frame->overlays_deferred && overlay_recorder != nullptr && frame->overlay_buffer;
+#endif
 
     const vk::CommandBuffer cmdbuf = frame->cmdbuf;
     cmdbuf.begin(vk::CommandBufferBeginInfo{
@@ -698,7 +872,12 @@ void PresentWindow::CopyToSwapchain(Frame* frame) {
                               .access = vk::AccessFlagBits::eColorAttachmentWrite,
                               .stage = vk::PipelineStageFlagBits::eColorAttachmentOutput,
                           },
-                          swapchain.Image());
+                          swapchain.Image(), overlays);
+#ifdef ENABLE_LSFG
+    if (overlays) {
+        RecordOverlayPass(cmdbuf, frame);
+    }
+#endif
     cmdbuf.end();
 
     SubmitAndPresent(cmdbuf, frame->render_ready, frame->present_done);
