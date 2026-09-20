@@ -156,6 +156,8 @@ option(ENABLE_DISCORD_RPC "Enables Discord Rich Presence" OFF)
 
 option(ENABLE_MICROPROFILE "Enables microprofile capabilities" OFF)
 
+option(ENABLE_ZONE_PROFILER "Enables the in-emulator zone profiler" OFF)
+
 option(ENABLE_SSE42 "Enable SSE4.2 optimizations on x86_64" ON)
 
 option(ENABLE_DEVELOPER_OPTIONS "Enable functionality targeted at emulator developers" OFF)
@@ -257,6 +259,10 @@ if (ENABLE_SDL2)
 endif()
 if (ENABLE_LSFG)
     add_definitions(-DENABLE_LSFG)
+endif()
+if (ENABLE_ZONE_PROFILER)
+    message(STATUS "Zone profiler enabled")
+    add_definitions(-DDEKOPON_PROFILING)
 endif()
 
 if(ENABLE_SSE42 AND (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64"))

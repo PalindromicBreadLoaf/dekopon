@@ -12,8 +12,10 @@
 #include "audio_core/lle/lle.h"
 #include "common/arch.h"
 #include "common/logging/log.h"
+#include "common/microprofile.h"
 #include "common/scope_exit.h"
 #include "common/settings.h"
+#include "common/zone_profiler.h"
 #include "core/arm/arm_interface.h"
 #include "core/arm/exclusive_monitor.h"
 #include "core/hle/service/cam/cam.h"
@@ -85,12 +87,16 @@ System::System() : movie{*this}, cheat_engine{*this} {}
 
 System::~System() = default;
 
+MICROPROFILE_DEFINE(Core_RunLoop, "Core", "Run loop", MP_RGB(120, 120, 120));
+
 System::ResultStatus System::RunLoop(bool tight_loop) {
     status = ResultStatus::Success;
 
     if (!IsPoweredOn()) {
         return ResultStatus::ErrorNotInitialized;
     }
+
+    MICROPROFILE_SCOPE(Core_RunLoop);
 
 #ifdef ENABLE_GDBSTUB
     if (GDBStub::IsServerEnabled()) {
@@ -597,6 +603,14 @@ void System::LogPerfStats(const PerfStats::Results& results) {
              state.min_emulation_speed * 100.0, results.time_vblank_interval * MS,
              state.max_frametime * MS, results.time_hle_svc * MS, results.time_hle_ipc * MS,
              results.time_gpu * MS, results.time_swap * MS, results.time_remaining * MS);
+
+    if constexpr (Common::Profiling::Enabled) {
+        const std::string profile = Common::Profiling::Consume();
+        if (!profile.empty()) {
+            const Common::Log::ScopedUnfiltered unfiltered;
+            LOG_INFO(Core, "{}", profile);
+        }
+    }
 
     state = PerfLogState{.last_log = now};
 }

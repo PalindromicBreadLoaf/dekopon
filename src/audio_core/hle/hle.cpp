@@ -23,6 +23,7 @@
 #include "common/assert.h"
 #include "common/common_types.h"
 #include "common/hash.h"
+#include "common/microprofile.h"
 #include "common/logging/log.h"
 #include "common/settings.h"
 #include "core/core.h"
@@ -458,7 +459,11 @@ bool DspHle::Impl::Tick() {
     return is_on;
 }
 
+MICROPROFILE_DEFINE(Audio_DspHle, "Audio", "DSP HLE", MP_RGB(80, 180, 80));
+
 void DspHle::Impl::AudioTickCallback(s64 cycles_late) {
+    MICROPROFILE_SCOPE(Audio_DspHle);
+
     if (Tick()) {
         // TODO(merry): Signal all the other interrupts as appropriate.
         interrupt_handler(InterruptType::Pipe, DspPipe::Audio);

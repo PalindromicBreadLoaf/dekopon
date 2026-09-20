@@ -7,6 +7,7 @@
 #include "common/error.h"
 #include "common/logging/log.h"
 #include "common/thread.h"
+#include "common/zone_profiler.h"
 #ifdef __APPLE__
 #include <mach/mach.h>
 #elif defined(_WIN32)
@@ -114,6 +115,7 @@ void SetCurrentThreadPriority(ThreadPriority new_priority) {
 
 // Sets the debugger-visible name of the current thread.
 void SetCurrentThreadName(const char* name) {
+    Profiling::SetThreadLabel(name);
     SetThreadDescription(GetCurrentThread(), UTF8ToUTF16W(name).data());
 }
 
@@ -122,6 +124,7 @@ void SetCurrentThreadName(const char* name) {
 // MinGW with the POSIX threading model does not support pthread_setname_np
 #if !defined(_WIN32) || defined(_MSC_VER)
 void SetCurrentThreadName(const char* name) {
+    Profiling::SetThreadLabel(name);
 #ifdef __APPLE__
     pthread_setname_np(name);
 #elif defined(__Bitrig__) || defined(__DragonFly__) || defined(__FreeBSD__) || defined(__OpenBSD__)

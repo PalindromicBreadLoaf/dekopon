@@ -9,6 +9,7 @@
 #include "common/android_utils.h"
 #endif
 #include "common/file_util.h"
+#include "common/logging/log.h"
 #include "common/settings.h"
 
 namespace Settings {
@@ -83,6 +84,8 @@ bool is_temporary_frame_limit;
 double temporary_frame_limit;
 
 void LogSettings() {
+    const Common::Log::ScopedUnfiltered unfiltered;
+
     const auto log_setting = [](std::string_view name, const auto& value) {
         LOG_INFO(Config, "{}: {}", name, value);
     };

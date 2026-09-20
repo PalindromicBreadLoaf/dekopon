@@ -19,6 +19,7 @@
 #include "common/file_util.h"
 #include "common/horizon_boost.h"
 #include "common/horizon_thread.h"
+#include "common/thread.h"
 #include "common/logging/log.h"
 #include "common/settings.h"
 #include "core/core.h"
@@ -242,6 +243,7 @@ std::string ResolveRomPath(const std::string& rom_arg) {
 }
 
 void EmuThread(std::string path) {
+    Common::SetCurrentThreadName("EmuThread");
     if (!Common::Horizon::PinCurrentThread(Common::Horizon::CoreEmu)) {
         LOG_WARNING(Frontend, "Failed to pin emulation thread to core 2");
     }

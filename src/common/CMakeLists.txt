@@ -61,6 +61,8 @@ add_library(citra_common STATIC EXCLUDE_FROM_ALL
     microprofile.cpp
     microprofile.h
     microprofileui.h
+    zone_profiler.cpp
+    zone_profiler.h
     optional_helper.h
     param_package.cpp
     param_package.h

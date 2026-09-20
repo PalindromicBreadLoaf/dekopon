@@ -13,6 +13,7 @@
 #include <fmt/format.h>
 #include "common/file_util.h"
 #include "common/settings.h"
+#include "common/zone_profiler.h"
 #include "core/core_timing.h"
 #include "core/perf_stats.h"
 #include "video_core/gpu.h"
@@ -114,6 +115,7 @@ void PerfStats::EndGameFrame() {
 
     game_frames += 1;
     PerfStats::game_frames_updated = true;
+    Common::Profiling::MarkFrame();
 }
 
 double PerfStats::GetMeanFrametime() const {

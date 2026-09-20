@@ -219,6 +219,8 @@ private:
     std::chrono::steady_clock::time_point last_flush{};
 };
 
+thread_local u32 unfiltered_depth = 0;
+
 /**
  * Collapses a call site that logs the same line every frame down to a trickle.
  */
@@ -423,12 +425,14 @@ public:
             });
             return;
         }
-        const auto repeat = repeat_filter.Check(filename, line_num);
-        if (!repeat.log) {
-            return;
-        }
-        if (repeat.suppressed != 0) {
-            new_entry.message += fmt::format(" (+{} suppressed)", repeat.suppressed);
+        if (unfiltered_depth == 0) {
+            const auto repeat = repeat_filter.Check(filename, line_num);
+            if (!repeat.log) {
+                return;
+            }
+            if (repeat.suppressed != 0) {
+                new_entry.message += fmt::format(" (+{} suppressed)", repeat.suppressed);
+            }
         }
         if (!message_queue.TryEmplace(std::move(new_entry))) {
             // Waiting for room makes the emulator wait constantly on logging.
@@ -649,6 +653,14 @@ private:
 #endif
 };
 } // namespace
+
+ScopedUnfiltered::ScopedUnfiltered() {
+    ++unfiltered_depth;
+}
+
+ScopedUnfiltered::~ScopedUnfiltered() {
+    --unfiltered_depth;
+}
 
 #ifdef HAVE_LIBRETRO
 void LibRetroStart(retro_log_printf_t callback) {

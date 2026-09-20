@@ -13,6 +13,11 @@
 #define MICROPROFILE_ENABLED 0
 #endif
 
+#ifdef DEKOPON_PROFILING
+#undef MICROPROFILE_ENABLED
+#define MICROPROFILE_ENABLED 0
+#endif
+
 // Customized Citra settings.
 // This file wraps the MicroProfile header so that these are consistent everywhere.
 #define MICROPROFILE_WEBSERVER 0
@@ -28,3 +33,16 @@ typedef void* HANDLE;
 #include <microprofile.h>
 
 #define MP_RGB(r, g, b) ((r) << 16 | (g) << 8 | (b) << 0)
+
+#ifdef DEKOPON_PROFILING
+#include "common/zone_profiler.h"
+
+#undef MICROPROFILE_DEFINE
+#undef MICROPROFILE_DECLARE
+#undef MICROPROFILE_SCOPE
+
+#define MICROPROFILE_DEFINE(ident, group, name, color)                                             \
+    CITRA_PROFILE_ZONE_DEFINE(ident, group, name)
+#define MICROPROFILE_DECLARE(ident) CITRA_PROFILE_ZONE_DECLARE(ident)
+#define MICROPROFILE_SCOPE(ident) CITRA_PROFILE_SCOPE(ident)
+#endif

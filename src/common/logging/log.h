@@ -27,6 +27,15 @@ void FmtLogMessageImpl(Class log_class, Level log_level, const char* filename,
                        unsigned int line_num, const char* function, fmt::string_view format,
                        const fmt::format_args& args);
 
+class ScopedUnfiltered {
+public:
+    ScopedUnfiltered();
+    ~ScopedUnfiltered();
+
+    ScopedUnfiltered(const ScopedUnfiltered&) = delete;
+    ScopedUnfiltered& operator=(const ScopedUnfiltered&) = delete;
+};
+
 template <typename... Args>
 void FmtLogMessage(Class log_class, Level log_level, const char* filename, unsigned int line_num,
                    const char* function, fmt::format_string<Args...> format, const Args&... args) {
