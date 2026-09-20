@@ -4,6 +4,8 @@
 
 #include "common/alignment.h"
 #include "common/math_util.h"
+#include "common/microprofile.h"
+#include "common/zone_profiler.h"
 #include "core/memory.h"
 #include "video_core/pica/pica_core.h"
 #include "video_core/rasterizer_accelerated.h"
@@ -89,6 +91,12 @@ void RasterizerAccelerated::AddTriangle(const Pica::OutputVertex& v0, const Pica
     vertex_batch.emplace_back(v2, AreQuaternionsOpposite(v0.quat, v2.quat));
 }
 
+MICROPROFILE_DEFINE(Draw_IndexFlush, "Draw", "Index range flush", MP_RGB(200, 120, 60));
+MICROPROFILE_DEFINE(Draw_IndexMinMax, "Draw", "Index min/max scan", MP_RGB(200, 160, 60));
+CITRA_PROFILE_COUNTER_DEFINE(vs_input_size, "Draw", "vs_input_size bytes");
+CITRA_PROFILE_COUNTER_DEFINE(vertex_span, "Draw", "vertex span");
+CITRA_PROFILE_COUNTER_DEFINE(index_count, "Draw", "index count");
+
 [[gnu::hot]] RasterizerAccelerated::VertexArrayInfo RasterizerAccelerated::AnalyzeVertexArray(
     bool is_indexed, u32 stride_alignment) {
     const auto& vertex_attributes = regs.pipeline.vertex_attributes;
@@ -112,16 +120,23 @@ void RasterizerAccelerated::AddTriangle(const Pica::OutputVertex& v0, const Pica
         const u32 count = regs.pipeline.num_vertices;
         const u32 index_size = index_u16 ? 2 : 1;
         const u32 size = count * index_size;
-        FlushRegion(address, size);
+        {
+            MICROPROFILE_SCOPE(Draw_IndexFlush);
+            FlushRegion(address, size);
+        }
 
-        if (index_u16) {
-            const auto res = Common::FindMinMax({index_address_16, static_cast<size_t>(count)});
-            vertex_min = static_cast<u32>(res.first);
-            vertex_max = static_cast<u32>(res.second);
-        } else {
-            const auto res = Common::FindMinMax({index_address_8, static_cast<size_t>(count)});
-            vertex_min = static_cast<u32>(res.first);
-            vertex_max = static_cast<u32>(res.second);
+        {
+            MICROPROFILE_SCOPE(Draw_IndexMinMax);
+            if (index_u16) {
+                const auto res =
+                    Common::FindMinMax({index_address_16, static_cast<size_t>(count)});
+                vertex_min = static_cast<u32>(res.first);
+                vertex_max = static_cast<u32>(res.second);
+            } else {
+                const auto res = Common::FindMinMax({index_address_8, static_cast<size_t>(count)});
+                vertex_min = static_cast<u32>(res.first);
+                vertex_max = static_cast<u32>(res.second);
+            }
         }
     } else {
         vertex_min = regs.pipeline.vertex_offset;
@@ -129,16 +144,25 @@ void RasterizerAccelerated::AddTriangle(const Pica::OutputVertex& v0, const Pica
     }
 
     const u32 vertex_num = vertex_max - vertex_min + 1;
+    const u32 vs_input_size = VertexInputSize(vertex_num, stride_alignment);
+
+    CITRA_PROFILE_COUNT(vs_input_size, vs_input_size);
+    CITRA_PROFILE_COUNT(vertex_span, vertex_num);
+    CITRA_PROFILE_COUNT(index_count, regs.pipeline.num_vertices);
+
+    return {vertex_min, vertex_max, vs_input_size};
+}
+
+u32 RasterizerAccelerated::VertexInputSize(u32 vertex_num, u32 stride_alignment) const {
     u32 vs_input_size = 0;
-    for (const auto& loader : vertex_attributes.attribute_loaders) {
+    for (const auto& loader : regs.pipeline.vertex_attributes.attribute_loaders) {
         if (loader.component_count != 0) {
             const u32 aligned_stride =
                 Common::AlignUp(static_cast<u32>(loader.byte_count), stride_alignment);
             vs_input_size += Common::AlignUp(aligned_stride * vertex_num, 4);
         }
     }
-
-    return {vertex_min, vertex_max, vs_input_size};
+    return vs_input_size;
 }
 
 void RasterizerAccelerated::SyncDrawUniforms() {

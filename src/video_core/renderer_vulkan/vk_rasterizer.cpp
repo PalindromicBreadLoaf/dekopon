@@ -2,12 +2,15 @@
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
 
+#include <algorithm>
+
 #include "common/alignment.h"
 #include "common/literals.h"
 #include "common/logging/log.h"
 #include "common/math_util.h"
 #include "common/microprofile.h"
 #include "common/settings.h"
+#include "common/zone_profiler.h"
 #include "core/core.h"
 #include "core/loader/loader.h"
 #include "core/memory.h"
@@ -25,6 +28,10 @@ namespace {
 MICROPROFILE_DEFINE(Vulkan_VS, "Vulkan", "Vertex Shader Setup", MP_RGB(192, 128, 128));
 MICROPROFILE_DEFINE(Vulkan_GS, "Vulkan", "Geometry Shader Setup", MP_RGB(128, 192, 128));
 MICROPROFILE_DEFINE(Vulkan_Drawing, "Vulkan", "Drawing", MP_RGB(128, 128, 192));
+MICROPROFILE_DEFINE(Vulkan_VertexArray, "Vulkan", "Vertex array upload", MP_RGB(60, 160, 200));
+MICROPROFILE_DEFINE(Vulkan_VertexFlush, "Vulkan", "Vertex range flush", MP_RGB(60, 200, 160));
+MICROPROFILE_DEFINE(Vulkan_VertexCompact, "Vulkan", "Vertex compaction", MP_RGB(160, 60, 200));
+CITRA_PROFILE_COUNTER_DEFINE(compacted_span, "Draw", "compacted vertices");
 
 using TriangleTopology = Pica::PipelineRegs::TriangleTopology;
 using VideoCore::SurfaceType;
@@ -312,9 +319,12 @@ void RasterizerVulkan::SetupVertexArray() {
 
         const PAddr data_addr =
             base_address + loader.data_offset + (vs_input_index_min * loader.byte_count);
-        const u32 vertex_num = vs_input_index_max - vs_input_index_min + 1;
-        u32 data_size = loader.byte_count * vertex_num;
-        res_cache.FlushRegion(data_addr, data_size);
+        const u32 span = vs_input_index_max - vs_input_index_min + 1;
+        const u32 data_size = loader.byte_count * span;
+        {
+            MICROPROFILE_SCOPE(Vulkan_VertexFlush);
+            res_cache.FlushRegion(data_addr, data_size);
+        }
 
         const MemoryRef src_ref = memory.GetPhysicalRef(data_addr);
         if (src_ref.GetSize() < data_size) {
@@ -329,7 +339,14 @@ void RasterizerVulkan::SetupVertexArray() {
         // Align stride up if required by Vulkan implementation.
         const u32 aligned_stride =
             Common::AlignUp(static_cast<u32>(loader.byte_count), stride_alignment);
-        if (aligned_stride == loader.byte_count) {
+        const u32 vertex_num = compaction.active ? compaction.unique_count : span;
+        if (compaction.active) {
+            for (u32 slot = 0; slot < vertex_num; slot++) {
+                std::memcpy(dst_ptr + slot * aligned_stride,
+                            src_ptr + compaction.sources[slot] * loader.byte_count,
+                            loader.byte_count);
+            }
+        } else if (aligned_stride == loader.byte_count) {
             std::memcpy(dst_ptr, src_ptr, data_size);
         } else {
             for (std::size_t vertex = 0; vertex < vertex_num; vertex++) {
@@ -443,6 +460,71 @@ bool RasterizerVulkan::SetupGeometryShader() {
     return pipeline_cache.UseFixedGeometryShader(regs);
 }
 
+namespace {
+constexpr u32 MinCompactionInputSize = 8 * 1024;
+constexpr u32 MinCompactionRatio = 4;
+constexpr u32 IndexSpaceSize = 0x10000;
+} // Anonymous namespace
+
+void RasterizerVulkan::BuildVertexCompaction(bool is_indexed) {
+    compaction.active = false;
+    if (!is_indexed) {
+        return;
+    }
+
+    const u32 index_count = regs.pipeline.num_vertices;
+    const u32 span = vertex_info.vs_input_index_max - vertex_info.vs_input_index_min + 1;
+    if (index_count == 0 || vertex_info.vs_input_size < MinCompactionInputSize ||
+        span < static_cast<u64>(index_count) * MinCompactionRatio) {
+        return;
+    }
+
+    const auto& index_info = regs.pipeline.index_array;
+    const u8* index_data = memory.GetPhysicalPointer(
+        regs.pipeline.vertex_attributes.GetPhysicalBaseAddress() + index_info.offset);
+    if (index_data == nullptr) {
+        return;
+    }
+
+    MICROPROFILE_SCOPE(Vulkan_VertexCompact);
+
+    if (compaction.remap.empty()) {
+        compaction.remap.resize(IndexSpaceSize);
+    }
+    if (++compaction.epoch > 0xFFFF) {
+        std::fill(compaction.remap.begin(), compaction.remap.end(), 0);
+        compaction.epoch = 1;
+    }
+    const u32 tag = compaction.epoch << 16;
+
+    compaction.sources.clear();
+    compaction.indices.resize(index_count);
+
+    const bool index_u16 = index_info.format != 0;
+    const u16* index_data_16 = reinterpret_cast<const u16*>(index_data);
+    const u32 base = vertex_info.vs_input_index_min;
+
+    for (u32 i = 0; i < index_count; i++) {
+        const u32 index = index_u16 ? index_data_16[i] : index_data[i];
+        u32& entry = compaction.remap[index];
+        if ((entry & 0xFFFF0000u) != tag) {
+            entry = tag | static_cast<u32>(compaction.sources.size());
+            compaction.sources.push_back(static_cast<u16>(index - base));
+        }
+        compaction.indices[i] = static_cast<u16>(entry & 0xFFFFu);
+    }
+
+    compaction.unique_count = static_cast<u32>(compaction.sources.size());
+    if (compaction.unique_count >= span) {
+        return;
+    }
+
+    compaction.active = true;
+    vertex_info.vs_input_size =
+        VertexInputSize(compaction.unique_count, instance.GetMinVertexStrideAlignment());
+    CITRA_PROFILE_COUNT(compacted_span, compaction.unique_count);
+}
+
 bool RasterizerVulkan::AccelerateDrawBatch(bool is_indexed) {
     if (regs.pipeline.use_gs != Pica::PipelineRegs::UseGS::No) {
         if (regs.pipeline.gs_config.mode != Pica::PipelineRegs::GSMode::Point) {
@@ -468,7 +550,11 @@ bool RasterizerVulkan::AccelerateDrawBatch(bool is_indexed) {
         // Do not draw anything if the vertex array is invalid.
         return true;
     }
-    SetupVertexArray();
+    BuildVertexCompaction(is_indexed);
+    {
+        MICROPROFILE_SCOPE(Vulkan_VertexArray);
+        SetupVertexArray();
+    }
 
     if (!SetupVertexShader()) {
         return false;
@@ -492,7 +578,8 @@ bool RasterizerVulkan::AccelerateDrawBatchInternal(bool is_indexed) {
 
     const DrawParams params = {
         .vertex_count = regs.pipeline.num_vertices,
-        .vertex_offset = -static_cast<s32>(vertex_info.vs_input_index_min),
+        .vertex_offset =
+            compaction.active ? 0 : -static_cast<s32>(vertex_info.vs_input_index_min),
         .binding_count = pipeline_info.state.vertex_layout.binding_count,
         .bindings = binding_offsets,
         .is_indexed = is_indexed,
@@ -514,7 +601,7 @@ bool RasterizerVulkan::AccelerateDrawBatchInternal(bool is_indexed) {
 }
 
 void RasterizerVulkan::SetupIndexArray() {
-    const bool index_u8 = regs.pipeline.index_array.format == 0;
+    const bool index_u8 = !compaction.active && regs.pipeline.index_array.format == 0;
     const bool native_u8 = index_u8 && instance.IsIndexTypeUint8Supported();
     const u32 index_buffer_size = regs.pipeline.num_vertices * (native_u8 ? 1 : 2);
     const vk::IndexType index_type = native_u8 ? vk::IndexType::eUint8EXT : vk::IndexType::eUint16;
@@ -525,7 +612,9 @@ void RasterizerVulkan::SetupIndexArray() {
 
     auto [index_ptr, index_offset, _] = stream_buffer.Map(index_buffer_size, 2);
 
-    if (index_u8 && !native_u8) {
+    if (compaction.active) {
+        std::memcpy(index_ptr, compaction.indices.data(), index_buffer_size);
+    } else if (index_u8 && !native_u8) {
         u16* index_ptr_u16 = reinterpret_cast<u16*>(index_ptr);
         for (u32 i = 0; i < regs.pipeline.num_vertices; i++) {
             index_ptr_u16[i] = index_data[i];

@@ -60,6 +60,9 @@ protected:
     /// Retrieve the range and the size of the input vertex
     VertexArrayInfo AnalyzeVertexArray(bool is_indexed, u32 stride_alignment = 1);
 
+    /// Size of the vertex buffer needed to hold vertex_num vertices of every enabled loader.
+    u32 VertexInputSize(u32 vertex_num, u32 stride_alignment) const;
+
 protected:
     Memory::MemorySystem& memory;
     Pica::PicaCore& pica;

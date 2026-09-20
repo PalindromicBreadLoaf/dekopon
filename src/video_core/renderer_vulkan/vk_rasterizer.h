@@ -98,6 +98,9 @@ private:
     /// Setup index array for AccelerateDrawBatch
     void SetupIndexArray();
 
+    /// Decides whether to gather only the referenced vertices
+    void BuildVertexCompaction(bool is_indexed);
+
     /// Setup vertex array for AccelerateDrawBatch
     void SetupVertexArray();
 
@@ -128,6 +131,16 @@ private:
     std::array<vk::Buffer, 16> vertex_buffers;
     VertexArrayInfo vertex_info;
     PipelineInfo pipeline_info{};
+
+    struct VertexCompaction {
+        bool active{};
+        u32 unique_count{};
+        std::vector<u16> sources;
+        std::vector<u16> indices;
+        std::vector<u32> remap;
+        u32 epoch{};
+    };
+    VertexCompaction compaction;
 
     StreamBuffer stream_buffer;     ///< Vertex+Index buffer
     StreamBuffer uniform_buffer;    ///< Uniform buffer
