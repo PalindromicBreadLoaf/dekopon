@@ -303,6 +303,11 @@ void EmuWindow::UpdateCurrentFramebufferLayout(u32 width, u32 height, bool is_po
 #endif
         case Settings::LayoutOption::Default:
         default:
+            if (Layout::UseEqualWidthStack(Settings::values.upright_screen.GetValue())) {
+                layout = Layout::EqualWidthFrameLayout(
+                    width, height, Settings::values.swap_screen.GetValue(), true);
+                break;
+            }
             layout =
                 Layout::DefaultFrameLayout(width, height, Settings::values.swap_screen.GetValue(),
                                            Settings::values.upright_screen.GetValue());

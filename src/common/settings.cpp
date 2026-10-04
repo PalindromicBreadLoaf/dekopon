@@ -146,6 +146,7 @@ void LogSettings() {
     }
     log_setting("Layout_LayoutOption", values.layout_option.GetValue());
     log_setting("Layout_PortraitLayoutOption", values.portrait_layout_option.GetValue());
+    log_setting("Layout_UprightLayoutOption", values.upright_layout_option.GetValue());
     log_setting("Layout_SecondaryDisplayLayout", values.secondary_display_layout.GetValue());
     log_setting("Layout_SwapScreen", values.swap_screen.GetValue());
     log_setting("Layout_UprightScreen", values.upright_screen.GetValue());
@@ -260,6 +261,7 @@ void RestoreGlobalState(bool is_powered_on) {
     values.simulate_3ds_gpu_timings.SetGlobal(true);
     values.layout_option.SetGlobal(true);
     values.portrait_layout_option.SetGlobal(true);
+    values.upright_layout_option.SetGlobal(true);
     values.secondary_display_layout.SetGlobal(true);
     values.layouts_to_cycle.SetGlobal(true);
     values.swap_screen.SetGlobal(true);

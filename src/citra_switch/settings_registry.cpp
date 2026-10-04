@@ -76,6 +76,8 @@ constexpr std::array<const char*, 8> kOverlayPositionNames{
     "Top right",   "Middle right", "Bottom right", "Top left",
     "Middle left", "Bottom left",  "Top centre",   "Bottom centre"};
 
+constexpr std::array<const char*, 2> kUprightLayoutNames{"Original", "Equal Width"};
+
 constexpr std::array<const char*, 2> kUpdateChannelNames{"Stable", "Prerelease"};
 
 constexpr std::array kGraphicsApis{
@@ -985,6 +987,10 @@ void BuildLayout(std::vector<SettingEntry>& out) {
                           QuickSection::Display},
                          v.screen_gap, 0, 200, 4, " px"));
     t << LargeScreenProportionEntry();
+    t << Relayout(Choice({"Rotated Stack Layout",
+                          "Makes both screens the same width in the rotated vertical stack.",
+                          EntryFlag::None, QuickSection::Display},
+                         v.upright_layout_option, kUprightLayoutNames));
     t.Ini("Switch");
     t << LocalBool("stretch_fullscreen",
                    {"Stretch Fullscreen",

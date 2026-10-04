@@ -94,6 +94,7 @@ foreach(KEY IN ITEMS
     "screen_bottom_leftright_padding"
     "screen_bottom_topbottom_padding"
     "portrait_layout_option"
+    "upright_layout_option"
     "custom_portrait_top_x"
     "custom_portrait_top_y"
     "custom_portrait_top_width"

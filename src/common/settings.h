@@ -64,6 +64,12 @@ enum class PortraitLayoutOption : u32 {
     PortraitOriginal
 };
 
+/** Defines how the screens are sized in the upright Default layout */
+enum class UprightLayoutOption : u32 {
+    Original,
+    EqualWidth,
+};
+
 enum class SecondaryDisplayLayout : u32 {
     None,
     TopScreenOnly,
@@ -645,6 +651,8 @@ struct Values {
 
     SwitchableSetting<PortraitLayoutOption> portrait_layout_option{
         PortraitLayoutOption::PortraitTopFullWidth, Keys::portrait_layout_option};
+    SwitchableSetting<UprightLayoutOption> upright_layout_option{UprightLayoutOption::Original,
+                                                                 Keys::upright_layout_option};
     Setting<u16> custom_portrait_top_x{0, Keys::custom_portrait_top_x};
     Setting<u16> custom_portrait_top_y{0, Keys::custom_portrait_top_y};
     Setting<u16> custom_portrait_top_width{800, Keys::custom_portrait_top_width};

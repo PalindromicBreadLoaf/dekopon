@@ -84,6 +84,28 @@ FramebufferLayout PortraitOriginalLayout(u32 width, u32 height, bool swapped, bo
     return res;
 }
 
+FramebufferLayout EqualWidthFrameLayout(u32 width, u32 height, bool swapped, bool upright) {
+    return LargeFrameLayout(width, height, swapped, upright, swapped ? 1.25f : 0.8f,
+                            Settings::SmallScreenPosition::BelowLarge, false);
+}
+
+bool UseEqualWidthStack(bool upright) {
+    return upright && Settings::values.upright_layout_option.GetValue() ==
+                          Settings::UprightLayoutOption::EqualWidth;
+}
+
+// Native size of the equal-width stack, before any upright rotation and without the screen gap.
+static std::pair<u32, u32> EqualWidthStackSize(bool swapped) {
+    if (swapped) {
+        return {Core::kScreenBottomWidth,
+                Core::kScreenBottomHeight +
+                    Core::kScreenTopHeight * Core::kScreenBottomWidth / Core::kScreenTopWidth};
+    }
+    return {Core::kScreenTopWidth,
+            Core::kScreenTopHeight +
+                Core::kScreenBottomHeight * Core::kScreenTopWidth / Core::kScreenBottomWidth};
+}
+
 FramebufferLayout SingleFrameLayout(u32 width, u32 height, bool swapped, bool upright) {
     ASSERT(width > 0);
     ASSERT(height > 0);
@@ -149,7 +171,8 @@ FramebufferLayout SingleFrameLayout(u32 width, u32 height, bool swapped, bool up
 
 FramebufferLayout LargeFrameLayout(u32 width, u32 height, bool swapped, bool upright,
                                    float scale_factor,
-                                   Settings::SmallScreenPosition small_screen_position) {
+                                   Settings::SmallScreenPosition small_screen_position,
+                                   bool allow_integer_scaling) {
     ASSERT(width > 0);
     ASSERT(height > 0);
     if (upright) {
@@ -183,7 +206,8 @@ FramebufferLayout LargeFrameLayout(u32 width, u32 height, bool swapped, bool upr
     Common::Rectangle<u32> screen_window_area{0, 0, width, height};
     Common::Rectangle<u32> total_rect{0, 0, emulation_width, emulation_height};
     total_rect = MaxRectangle(screen_window_area, total_rect,
-                              Settings::values.use_integer_scaling.GetValue());
+                              allow_integer_scaling &&
+                                  Settings::values.use_integer_scaling.GetValue());
     total_rect = total_rect.TranslateX((width - total_rect.GetWidth()) / 2)
                      .TranslateY((height - total_rect.GetHeight()) / 2);
 
@@ -645,6 +669,15 @@ FramebufferLayout FrameLayoutFromResolutionScale(u32 res_scale, bool is_secondar
             break;
         case Settings::LayoutOption::Default:
         default:
+            if (UseEqualWidthStack(Settings::values.upright_screen.GetValue())) {
+                const bool swapped = Settings::values.swap_screen.GetValue();
+                const auto [stack_width, stack_height] = EqualWidthStackSize(swapped);
+                width = stack_width * res_scale;
+                height = stack_height * res_scale + gap;
+                std::swap(width, height);
+                layout = EqualWidthFrameLayout(width, height, swapped, true);
+                break;
+            }
             width = Core::kScreenTopWidth * res_scale;
             height = (Core::kScreenTopHeight + Core::kScreenBottomHeight) * res_scale + gap;
 
@@ -841,6 +874,13 @@ std::pair<unsigned, unsigned> GetMinimumSizeFromLayout(Settings::LayoutOption la
     }
     case Settings::LayoutOption::Default:
     default:
+        if (UseEqualWidthStack(upright_screen)) {
+            const auto [stack_width, stack_height] =
+                EqualWidthStackSize(Settings::values.swap_screen.GetValue());
+            min_width = stack_width;
+            min_height = stack_height;
+            break;
+        }
         min_width = Core::kScreenTopWidth;
         min_height = Core::kScreenTopHeight + Core::kScreenBottomHeight;
         break;

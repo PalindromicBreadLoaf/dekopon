@@ -101,6 +101,22 @@ FramebufferLayout PortraitOriginalLayout(u32 width, u32 height, bool is_swapped,
                                          bool upright = false);
 
 /**
+ * Factory method for constructing a stacked FramebufferLayout where both screens have the same
+ * width. Ignores use_integer_scaling so the stack always fills the window width.
+ * @param width Window framebuffer width in pixels
+ * @param height Window framebuffer height in pixels
+ * @param is_swapped if true, the bottom screen sets the width and is displayed first
+ * @param upright if true, the screens will be rotated 90 degrees anti-clockwise
+ * @return Newly created FramebufferLayout object with stacked screen regions initialized
+ */
+FramebufferLayout EqualWidthFrameLayout(u32 width, u32 height, bool is_swapped, bool upright);
+
+/**
+ * Whether the Default layout should use EqualWidthFrameLayout.
+ */
+bool UseEqualWidthStack(bool upright);
+
+/**
  * Factory method for constructing a FramebufferLayout with only the top or bottom screen
  * @param width Window framebuffer width in pixels
  * @param height Window framebuffer height in pixels
@@ -119,11 +135,13 @@ FramebufferLayout SingleFrameLayout(u32 width, u32 height, bool is_swapped, bool
  * @param scale_factor The ratio between the large screen with respect to the smaller screen
  * @param vertical_alignment The vertical alignment of the smaller screen relative to the larger
  * screen
+ * @param allow_integer_scaling if true, apply the use_integer_scaling setting
  * @return Newly created FramebufferLayout object with default screen regions initialized
  */
 FramebufferLayout LargeFrameLayout(u32 width, u32 height, bool is_swapped, bool upright,
                                    float scale_factor,
-                                   Settings::SmallScreenPosition small_screen_position);
+                                   Settings::SmallScreenPosition small_screen_position,
+                                   bool allow_integer_scaling = true);
 /**
  * Factory method for constructing a Frame where the large screen fills the window and the small
  * screen floats on top of it, anchored to one of its edges or corners
